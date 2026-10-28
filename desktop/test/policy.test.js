@@ -16,6 +16,16 @@ test('داخل النافذة: صفحات البرنامج فقط', () => {
   }
 });
 
+test('ملفات البرنامج المؤقتة (مرفقات PDF): blob من نفس الموقع فقط', () => {
+  assert.equal(P.isAppBlob(`blob:${HOST}/3f2a-uuid`), true);
+  assert.equal(P.isAppBlob('blob:https://evil.com/3f2a'), false);
+  assert.equal(P.isAppBlob(`blob:${HOST}.evil.com/x`), false);
+  assert.equal(P.isAppBlob(`${HOST}/ahsebha/`), false);
+  assert.equal(P.isAppBlob(''), false);
+  assert.equal(P.isAppBlob(null), false);
+  assert.equal(P.isApp(`blob:${HOST}/x`), false, 'blob ليس صفحة تُعرض داخل النافذة');
+});
+
 test('الروابط الخارجية: واتساب والمواقع والبريد والهاتف فقط', () => {
   for (const u of ['https://wa.me/962791234567?text=hi', 'https://api.whatsapp.com/send/?phone=1', 'http://example.com', 'mailto:a@b.com', 'tel:+962791234567']) assert.equal(P.isExternal(u), true, u);
   for (const u of ['file:///C:/Windows/System32/calc.exe', 'javascript:alert(1)', 'data:text/html,hi', 'blob:https://x/1', 'ms-msdt:/id', 'smb://host/share', 'vscode://x', '', 'x']) assert.equal(P.isExternal(u), false, u);
@@ -40,10 +50,13 @@ test('الصلاحيات: الكاميرا بدون ميكروفون، والن�
 });
 
 test('وسائط التشغيل: اختبار التشغيل فقط عند طلبه', () => {
-  assert.deepEqual(parseArgs(['electron', '.']), { smoke: false, smokeOut: '' });
-  assert.deepEqual(parseArgs(['app', '--smoke-test']), { smoke: true, smokeOut: '' });
-  assert.deepEqual(parseArgs(['app', '--smoke-test', '--smoke-out=/tmp/x.json']), { smoke: true, smokeOut: '/tmp/x.json' });
-  assert.deepEqual(parseArgs(['app', '--smoke-out=C:\\a b\\x.json']), { smoke: false, smokeOut: 'C:\\a b\\x.json' });
+  const base = { smoke: false, smokeOffline: false, smokeNoNetwork: false, smokeOut: '', smokeUserData: '' };
+  assert.deepEqual(parseArgs(['electron', '.']), base);
+  assert.deepEqual(parseArgs(['app', '--smoke-test']), { ...base, smoke: true });
+  assert.deepEqual(parseArgs(['app', '--smoke-offline']), { ...base, smoke: true, smokeOffline: true });
+  assert.deepEqual(parseArgs(['app', '--smoke-no-network', '--smoke-user-data=/tmp/p']), { ...base, smoke: true, smokeNoNetwork: true, smokeUserData: '/tmp/p' });
+  assert.deepEqual(parseArgs(['app', '--smoke-test', '--smoke-out=/tmp/x.json']), { ...base, smoke: true, smokeOut: '/tmp/x.json' });
+  assert.deepEqual(parseArgs(['app', '--smoke-out=C:\\a b\\x.json']), { ...base, smokeOut: 'C:\\a b\\x.json' });
 });
 
 test('بيئة التطوير المحلية: نفس القواعد على عنوان آخر', () => {

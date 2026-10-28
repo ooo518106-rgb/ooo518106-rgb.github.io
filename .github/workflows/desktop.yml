@@ -62,6 +62,36 @@ jobs:
           xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
           cat "$RUNNER_TEMP/smoke.json"
 
+      - name: اختبار صفحة «لا يوجد اتصال» (لينكس)
+        if: matrix.name == 'linux'
+        timeout-minutes: 3
+        env:
+          AHSEBHA_URL: http://127.0.0.1:1/ahsebha/
+        run: |
+          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-offline --smoke-out="$RUNNER_TEMP/smoke-offline.json"
+          cat "$RUNNER_TEMP/smoke-offline.json"
+
+      - name: اختبار العمل بدون إنترنت (لينكس) — نسخة هذا التعديل نفسها
+        if: matrix.name == 'linux'
+        timeout-minutes: 5
+        working-directory: .
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &
+          SERVER=$!
+          sleep 2
+          curl -sf http://127.0.0.1:8765/ahsebha/ >/dev/null
+          export AHSEBHA_URL=http://127.0.0.1:8765/ahsebha/
+          APP=./desktop/dist/linux-unpacked/ahsebha
+          PROFILE="$RUNNER_TEMP/profile"
+          echo "--- التشغيل الأول: بإنترنت، يحفظ البرنامج نفسه"
+          xvfb-run -a $APP --no-sandbox --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/run1.json"
+          cat "$RUNNER_TEMP/run1.json"
+          kill $SERVER
+          sleep 1
+          echo "--- التشغيل الثاني: بدون أي إنترنت (الخادم متوقف)"
+          xvfb-run -a $APP --no-sandbox --smoke-test --smoke-user-data="$PROFILE" --smoke-no-network --smoke-out="$RUNNER_TEMP/run2.json"
+          cat "$RUNNER_TEMP/run2.json"
+
       - name: اختبار ملف AppImage نفسه (لينكس)
         if: matrix.name == 'linux'
         timeout-minutes: 3
@@ -101,10 +131,11 @@ jobs:
           Write-Host '--- المجلدات المحتملة ---'
           Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Programs: $($_.FullName)" }
           Get-ChildItem $env:ProgramFiles -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*hsebha*' } | ForEach-Object { Write-Host "ProgramFiles: $($_.FullName)" }
-          Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:ProgramFiles -Recurse -Filter 'Ahsebha.exe' -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host "exe: $($_.FullName)" }
           if (-not $entry) { throw 'لا يوجد مدخل للبرنامج في سجل ويندوز بعد التثبيت' }
-          $dir = ($entry.InstallLocation).TrimEnd('\')
-          $exe = Join-Path $dir 'Ahsebha.exe'
+          # مسار الأيقونة في مدخل ويندوز هو مسار البرنامج المثبّت (مثل ...\Ahsebha.exe,0)
+          $exe = ($entry.DisplayIcon -replace ',\d+$', '').Trim('"')
+          $dir = Split-Path $exe
+          Write-Host "مكان التثبيت: $dir"
           if (-not (Test-Path $exe)) { throw "لم يُثبَّت البرنامج في $dir" }
           $desktop = [Environment]::GetFolderPath('Desktop')
           $start = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'

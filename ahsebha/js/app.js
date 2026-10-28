@@ -291,7 +291,7 @@ async function boot() {
     if (q.open && !q.contains(e.target)) q.open = false;
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
 }
 
