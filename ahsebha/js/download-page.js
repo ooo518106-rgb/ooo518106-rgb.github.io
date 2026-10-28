@@ -6,7 +6,7 @@ const root = document.getElementById('download');
 const os = detectOS();
 const mobile = os === 'ios' || os === 'android';
 
-const btn = (d, primary) => html`<a class="btn ${primary ? 'btn-primary' : 'btn-ghost'}" href="${downloadUrl(d.file)}" data-dl="${d.id}" rel="noopener">⬇️ ${d.icon} ${d.name}</a>`;
+const btn = (d, primary, label = `${d.icon} ${d.name}`) => html`<a class="btn ${primary ? 'btn-primary' : 'btn-ghost'}" href="${downloadUrl(d.file)}" data-dl="${d.id}" rel="noopener">⬇️ ${label}</a>`;
 
 function hero() {
   const mine = forOS(os);
@@ -24,7 +24,7 @@ function hero() {
 }
 
 const all = () => html`<section class="sales-sec"><div class="sec-head"><h2>كل التحميلات</h2></div>
-  <div class="plan-grid dl-grid">${DOWNLOADS.map((d) => html`<article class="plan" data-os="${d.os}"><h3>${d.icon} ${d.name}</h3><p class="plan-tag">${d.note}</p><div class="plan-cta">${btn(d, d.os === os)}</div></article>`)}</div></section>`;
+  <div class="plan-grid dl-grid">${DOWNLOADS.map((d) => html`<article class="plan" data-os="${d.os}"><h3>${d.icon} ${d.name}</h3><p class="plan-tag">${d.note}</p><div class="plan-cta">${btn(d, d.os === os, 'تحميل')}</div></article>`)}</div></section>`;
 
 const steps = () => html`<section class="sales-sec"><div class="sec-head"><h2>أول مرة تفتح الملف</h2>
     <p class="muted">الملفات غير موقّعة رقمياً بعد، فيعرض النظام تحذيراً عند أول تشغيل. هذا متوقع وليس فيروساً، وهذه خطوات المتابعة:</p></div>

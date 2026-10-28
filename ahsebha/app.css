@@ -700,7 +700,10 @@ html[data-role="cashier"] .page-head [data-del], html[data-role="cashier"] .page
 .dl-steps summary { cursor: pointer; font-weight: 800; padding: 10px 0; list-style-position: inside; }
 .dl-steps details[open] summary { color: var(--primary); }
 .dl-steps .install-steps { padding-bottom: 12px; }
+.dl-grid { grid-template-columns: repeat(4, 1fr); }
 .dl-grid .plan-cta .btn { white-space: normal; text-align: center; }
+@media (max-width: 960px) { .dl-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .dl-grid { grid-template-columns: 1fr; } }
 .notes-list { grid-template-columns: 1fr; }
 .notes-list li::before { content: 'ℹ️ '; }
 .install-app { margin-bottom: 12px; }
