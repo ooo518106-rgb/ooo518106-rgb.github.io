@@ -1,8 +1,36 @@
 // عامل الخدمة: يشغّل البرنامج بدون إنترنت. الشبكة أولاً دائماً حتى تصل التحديثات فوراً،
-// والنسخة المخزنة تُستخدم فقط عند انقطاع الاتصال.
-const CACHE = 'ahsebha-accounting-v7';
+// والنسخة المخزنة تُستخدم فقط عند انقطاع الاتصال. وعند التثبيت نحفظ ملفات البرنامج كلها فوراً،
+// فيعمل بدون إنترنت بعد أول زيارة (وليس بعد الثانية فقط).
+const CACHE = 'ahsebha-accounting-v8';
 
-self.addEventListener('install', () => self.skipWaiting());
+// الملفات الأساسية، ثم نتتبّع ما تستورده ملفات جافاسكربت (static وdynamic) فنحفظها كلها.
+// المكتبات الكبيرة (قراءة النص والباركود) تُحفظ عند أول استخدام لها فقط.
+const SHELL = ['./', 'index.html', 'app.css', 'manifest.json', 'js/app.js', 'vendor/qrcode.js', 'icons/icon.svg', 'icons/icon-192.png'];
+const IMPORT_RE = /(?:^|[\s;{}()])(?:import|export)\s*(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+async function precache() {
+  try {
+    const cache = await caches.open(CACHE);
+    const seen = new Set();
+    const queue = SHELL.map((p) => new URL(p, self.registration.scope).href);
+    while (queue.length) {
+      const url = queue.shift();
+      if (seen.has(url)) continue;
+      seen.add(url);
+      try {
+        const res = await fetch(url, { cache: 'reload' });
+        if (!res.ok) continue;
+        await cache.put(url, res.clone());
+        if (/\.m?js$/.test(new URL(url).pathname)) {
+          for (const m of (await res.text()).matchAll(IMPORT_RE)) {
+            const spec = m[1] || m[2];
+            if (spec && spec.startsWith('.')) queue.push(new URL(spec, url).href);
+          }
+        }
+      } catch (e) { /* ملف واحد فاشل لا يمنع الباقي */ }
+    }
+  } catch (e) { /* التثبيت يكمل بدون حفظ مسبق */ }
+}
+self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(precache()); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('ahsebha-accounting-') && k !== CACHE).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));

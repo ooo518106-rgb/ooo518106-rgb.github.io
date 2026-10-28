@@ -1,0 +1,225 @@
+name: تطبيق سطح المكتب
+
+# يبني برنامج احسبها لويندوز وماك ولينكس، ويشغّله فعلياً للتأكد أنه يعمل، وينشره عند الطلب.
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'انشر الإصدار على صفحة Releases'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: بناء ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows, flag: '--win' }
+          - { os: macos-latest, name: mac, flag: '--mac' }
+          - { os: ubuntu-latest, name: linux, flag: '--linux' }
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: تثبيت الأدوات
+        run: npm ci
+
+      - name: اختبار القواعد
+        run: npm test
+
+      - name: بناء ملف التثبيت
+        run: npx electron-builder ${{ matrix.flag }} --publish never
+
+      - name: اختبار التشغيل (لينكس)
+        if: matrix.name == 'linux'
+        timeout-minutes: 3
+        run: |
+          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          cat "$RUNNER_TEMP/smoke.json"
+
+      - name: اختبار صفحة «لا يوجد اتصال» (لينكس)
+        if: matrix.name == 'linux'
+        timeout-minutes: 3
+        env:
+          AHSEBHA_URL: http://127.0.0.1:1/ahsebha/
+        run: |
+          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-offline --smoke-out="$RUNNER_TEMP/smoke-offline.json"
+          cat "$RUNNER_TEMP/smoke-offline.json"
+
+      - name: اختبار العمل بدون إنترنت (لينكس) — نسخة هذا التعديل نفسها
+        if: matrix.name == 'linux'
+        timeout-minutes: 5
+        working-directory: .
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &
+          SERVER=$!
+          sleep 2
+          curl -sf http://127.0.0.1:8765/ahsebha/ >/dev/null
+          export AHSEBHA_URL=http://127.0.0.1:8765/ahsebha/
+          APP=./desktop/dist/linux-unpacked/ahsebha
+          PROFILE="$RUNNER_TEMP/profile"
+          echo "--- التشغيل الأول: بإنترنت، يحفظ البرنامج نفسه"
+          xvfb-run -a $APP --no-sandbox --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/run1.json"
+          cat "$RUNNER_TEMP/run1.json"
+          kill $SERVER
+          sleep 1
+          echo "--- التشغيل الثاني: بدون أي إنترنت (الخادم متوقف)"
+          xvfb-run -a $APP --no-sandbox --smoke-test --smoke-user-data="$PROFILE" --smoke-no-network --smoke-out="$RUNNER_TEMP/run2.json"
+          cat "$RUNNER_TEMP/run2.json"
+
+      - name: اختبار ملف AppImage نفسه (لينكس)
+        if: matrix.name == 'linux'
+        timeout-minutes: 3
+        run: |
+          chmod +x ./dist/Ahsebha-linux-x64.AppImage
+          xvfb-run -a ./dist/Ahsebha-linux-x64.AppImage --appimage-extract-and-run --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke-appimage.json"
+          cat "$RUNNER_TEMP/smoke-appimage.json"
+
+      - name: اختبار التشغيل (ويندوز)
+        if: matrix.name == 'windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'smoke.json'
+          $p = Start-Process -FilePath '.\dist\win-unpacked\Ahsebha.exe' -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out }
+          if ($p.ExitCode -ne 0) { throw "فشل اختبار التشغيل: رمز الخروج $($p.ExitCode)" }
+
+      - name: اختبار التثبيت الفعلي (ويندوز)
+        if: matrix.name == 'windows'
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = (Resolve-Path .\dist\Ahsebha-Setup.exe).Path
+          $p = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          Write-Host "رمز خروج المثبّت: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "فشل التثبيت: رمز الخروج $($p.ExitCode)" }
+          # أين ثُبّت؟ نسأل سجل ويندوز (مدخل إلغاء التثبيت)
+          function Get-Entry {
+            Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -like '*hsebha*' -or $_.DisplayName -like '*احسبها*' }
+          }
+          $entry = $null
+          for ($i = 0; $i -lt 60 -and -not $entry; $i++) { $entry = @(Get-Entry)[0]; if (-not $entry) { Start-Sleep -Seconds 1 } }
+          if ($entry) { $entry | Format-List DisplayName, DisplayVersion, InstallLocation, UninstallString, DisplayIcon }
+          Write-Host '--- المجلدات المحتملة ---'
+          Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Programs: $($_.FullName)" }
+          Get-ChildItem $env:ProgramFiles -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*hsebha*' } | ForEach-Object { Write-Host "ProgramFiles: $($_.FullName)" }
+          if (-not $entry) { throw 'لا يوجد مدخل للبرنامج في سجل ويندوز بعد التثبيت' }
+          # مسار الأيقونة في مدخل ويندوز هو مسار البرنامج المثبّت (مثل ...\Ahsebha.exe,0)
+          $exe = ($entry.DisplayIcon -replace ',\d+$', '').Trim('"')
+          $dir = Split-Path $exe
+          Write-Host "مكان التثبيت: $dir"
+          if (-not (Test-Path $exe)) { throw "لم يُثبَّت البرنامج في $dir" }
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $start = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          Write-Host "سطح المكتب: $desktop"; Get-ChildItem $desktop -Filter *.lnk | ForEach-Object { Write-Host "  $($_.Name)" }
+          Write-Host "قائمة ابدأ: $start"; Get-ChildItem $start -Filter *.lnk | ForEach-Object { Write-Host "  $($_.Name)" }
+          if (-not (Test-Path (Join-Path $desktop 'احسبها.lnk'))) { throw 'لا يوجد اختصار «احسبها» على سطح المكتب' }
+          if (-not (Test-Path (Join-Path $start 'احسبها.lnk'))) { throw 'لا يوجد اختصار «احسبها» في قائمة ابدأ' }
+          $out = Join-Path $env:RUNNER_TEMP 'smoke-installed.json'
+          $r = Start-Process -FilePath $exe -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out }
+          if ($r.ExitCode -ne 0) { throw "فشل تشغيل النسخة المثبّتة: رمز الخروج $($r.ExitCode)" }
+          $un = Join-Path $dir 'Uninstall Ahsebha.exe'
+          if (-not (Test-Path $un)) { throw 'لا يوجد برنامج إلغاء التثبيت' }
+          Start-Process -FilePath $un -ArgumentList '/S' -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw 'لم يُحذف البرنامج بعد إلغاء التثبيت' }
+          if (Test-Path (Join-Path $desktop 'احسبها.lnk')) { throw 'بقي الاختصار على سطح المكتب بعد إلغاء التثبيت' }
+          Write-Host 'تثبيت وتشغيل وإلغاء تثبيت: سليم'
+
+      - name: اختبار التشغيل (ماك)
+        if: matrix.name == 'mac'
+        timeout-minutes: 3
+        run: |
+          ./dist/mac-arm64/Ahsebha.app/Contents/MacOS/Ahsebha --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          cat "$RUNNER_TEMP/smoke.json"
+
+      - name: 'اختبار القرص (ماك) — تركيب ونسخ إلى Applications وتشغيل'
+        if: matrix.name == 'mac'
+        timeout-minutes: 5
+        run: |
+          hdiutil attach dist/Ahsebha-mac-arm64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg"
+          ls "$RUNNER_TEMP/dmg"
+          rm -rf "$HOME/Applications/Ahsebha.app" && mkdir -p "$HOME/Applications"
+          cp -R "$RUNNER_TEMP/dmg/Ahsebha.app" "$HOME/Applications/"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+          APP="$HOME/Applications/Ahsebha.app"
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundleDisplayName|CFBundleName|NSCameraUsageDescription|CFBundleIdentifier'
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            codesign -dv "$APP" 2>&1 | grep -E 'Signature|Identifier' || true
+            codesign --verify --deep --strict --verbose=2 "$APP"
+          fi
+          "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
+          cat "$RUNNER_TEMP/smoke-dmg.json"
+
+      - name: عرض الملفات الناتجة
+        shell: bash
+        run: ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: نشر الإصدار
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: إنشاء الإصدار أو تحديثه
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          TAG="desktop-v${VERSION}"
+          ls -la installers
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" installers/* --clobber
+          else
+            gh release create "$TAG" installers/* --target "$GITHUB_SHA" --title "احسبها لسطح المكتب ${VERSION}" --notes-file desktop/RELEASE_NOTES.md
+          fi
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | .name + " " + (.size|tostring))'

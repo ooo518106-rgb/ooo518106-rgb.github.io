@@ -1,0 +1,68 @@
+{
+  "name": "ahsebha",
+  "productName": "Ahsebha",
+  "version": "1.0.0",
+  "private": true,
+  "description": "احسبها — برنامج محاسبة عربي (تطبيق سطح المكتب)",
+  "author": "احسبها",
+  "homepage": "https://ooo518106-rgb.github.io/ahsebha/",
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "desktopName": "ahsebha.desktop",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.10.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "io.github.ooo518106-rgb.ahsebha",
+    "productName": "Ahsebha",
+    "copyright": "احسبها",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "policy.js", "offline.html", "package.json"],
+    "asar": true,
+    "electronLanguages": ["ar", "en-US"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "احسبها",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "artifactName": "Ahsebha-Setup.${ext}"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "Ahsebha-mac-${arch}.${ext}",
+      "extendInfo": {
+        "CFBundleDisplayName": "احسبها",
+        "NSCameraUsageDescription": "لقراءة الباركود وتصوير الإيصالات والفواتير."
+      }
+    },
+    "dmg": { "title": "Ahsebha" },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "category": "Office",
+      "executableName": "ahsebha",
+      "synopsis": "برنامج محاسبة عربي",
+      "artifactName": "Ahsebha-linux-x64.${ext}",
+      "syncDesktopName": true
+    }
+  }
+}

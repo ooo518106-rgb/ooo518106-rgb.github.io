@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>احسبها — لا يوجد اتصال</title>
+<style>
+  :root { --bg: #f8fafc; --card: #fff; --text: #1e293b; --muted: #64748b; --primary: #4f46e5; --border: #e2e8f0; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8; --primary: #818cf8; --border: #334155; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); color: var(--text); font-family: Cairo, "Segoe UI", Tahoma, sans-serif; line-height: 1.9; }
+  main { max-width: 520px; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 32px 24px; }
+  .ic { font-size: 3rem; }
+  h1 { font-size: 1.4rem; margin: 8px 0; }
+  p { color: var(--muted); margin: 6px 0; }
+  a.btn { display: inline-block; margin-top: 16px; padding: 10px 22px; border-radius: 12px; background: var(--primary); color: #fff; font-weight: 700; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="ic">📡</div>
+  <h1>لا يوجد اتصال بالإنترنت</h1>
+  <p>يحتاج البرنامج اتصالاً مرة واحدة عند أول تشغيل ليحفظ نفسه على جهازك. بعدها يعمل بدون إنترنت.</p>
+  <p>إن كنت قد شغّلته من قبل مع الإنترنت ولم يفتح الآن، تأكد من الاتصال ثم أعد المحاولة. بياناتك المحاسبية محفوظة على جهازك ولم تتأثر.</p>
+  <a class="btn" id="retry" href="#">إعادة المحاولة</a>
+</main>
+<script>
+  // الرابط يصل من البرنامج نفسه. نقبل فقط https (أو العنوان المحلي للتطوير)
+  try {
+    const u = new URL(new URLSearchParams(location.search).get('u') || '');
+    if (u.protocol === 'https:' || u.hostname === '127.0.0.1' || u.hostname === 'localhost') document.getElementById('retry').href = u.href;
+  } catch (e) { /* يبقى الزر بلا رابط */ }
+</script>
+</body>
+</html>
