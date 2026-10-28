@@ -24,7 +24,7 @@ const SEG_PERM = {
   assets: 'buy', cheques: 'buy', recurring: 'buy', audit: 'reports',
   employees: 'buy', payroll: 'buy', 'stock-transfers': 'buy', reconcile: 'buy',
   products: 'products', labels: 'products', import: 'products',
-  accounts: 'reports', reports: 'reports', collections: 'reports', '': 'reports',
+  accounts: 'reports', reports: 'reports', collections: 'reports', today: 'reports', '': 'reports',
   settings: 'settings', users: 'admin', welcome: null,
 };
 export function routePerm(path) {
