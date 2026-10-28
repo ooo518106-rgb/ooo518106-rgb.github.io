@@ -8,6 +8,7 @@
   "homepage": "https://ooo518106-rgb.github.io/ahsebha/",
   "license": "UNLICENSED",
   "main": "main.js",
+  "desktopName": "ahsebha.desktop",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
@@ -60,7 +61,8 @@
       "category": "Office",
       "executableName": "ahsebha",
       "synopsis": "برنامج محاسبة عربي",
-      "artifactName": "Ahsebha-linux-${arch}.${ext}"
+      "artifactName": "Ahsebha-linux-x64.${ext}",
+      "syncDesktopName": true
     }
   }
 }
