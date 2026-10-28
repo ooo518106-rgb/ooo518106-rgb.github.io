@@ -709,3 +709,12 @@ html[data-role="cashier"] .page-head [data-del], html[data-role="cashier"] .page
 .install-app { margin-bottom: 12px; }
 .install-alt h3 { font-size: 1rem; font-weight: 800; }
 .install-alt h4 { margin: 8px 0 0; font-size: .9rem; color: var(--text-muted); }
+
+/* ─── سجل التحديثات (لوحة المالك) ─── */
+.upd + .upd { margin-top: 12px; }
+.upd-cur { border-color: var(--primary); }
+.upd .card-h h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.upd-v { font-size: .85rem; letter-spacing: .02em; }
+.upd-items { margin: 0; padding-inline-start: 22px; display: grid; gap: 6px; line-height: 1.8; }
+.upd-chip { text-decoration: none; margin-inline-start: 6px; vertical-align: middle; }
+.owner-tabs [data-new-tab] { margin-inline-start: 4px; }

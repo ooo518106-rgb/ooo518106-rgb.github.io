@@ -6,9 +6,11 @@ import * as lic from './license.js';
 import { generateOwnerKeys, importPrivate, wrapKeys, unwrapKeys, buildPayload, signLicense, publicKeyLine, newLicenseId } from './license-sign.js';
 import { html, raw, $, $$, modal, confirmBox, toast, field, fmtDate, norm, download } from './ui.js';
 import { addDays, addMonths, ymd, daysBetween, isDate } from './core.js';
+import { CHANGELOG, VERSION, NUMBERED_LATER_BEFORE, cmpVersion } from './changelog.js';
 
 const LS_KEY = 'ahsebha-owner-key';
 const LS_DATA = 'ahsebha-owner-data';
+const LS_SEEN = 'ahsebha-owner-seen-version';
 const root = document.getElementById('owner');
 const today = () => ymd(new Date());
 
@@ -28,7 +30,9 @@ function normData(d) {
   return { v: 1, customers, exportedAt: String((d && d.exportedAt) || ''), keyBackupAt: String((d && d.keyBackupAt) || '') };
 }
 
-const state = { tab: 'customers', blob: readJSON(LS_KEY), keys: null, data: normData(readJSON(LS_DATA)), q: '' };
+const readSeen = () => { try { return localStorage.getItem(LS_SEEN) || ''; } catch (e) { return ''; } };
+// seen: آخر إصدار فتحتَ سجله. seenBefore: ما كان عند فتح الصفحة، فتبقى علامة «جديد» على البنود الجديدة طوال الجلسة
+const state = { tab: 'customers', blob: readJSON(LS_KEY), keys: null, data: normData(readJSON(LS_DATA)), q: '', seen: readSeen(), seenBefore: readSeen() };
 const save = () => writeJSON(LS_DATA, state.data);
 
 // ─── مساعدات ───
@@ -111,7 +115,8 @@ async function ensureKeys() {
 }
 
 // ─── الشاشة ───
-const TABS = [['customers', '👥 الزبائن'], ['key', '🔑 المفتاح'], ['tools', '🧰 أدوات ونسخ احتياطي']];
+const TABS = [['customers', '👥 الزبائن'], ['key', '🔑 المفتاح'], ['updates', '🆕 التحديثات'], ['tools', '🧰 أدوات ونسخ احتياطي']];
+const markSeen = () => { state.seen = VERSION; try { localStorage.setItem(LS_SEEN, VERSION); } catch (e) { /* للجلسة فقط */ } };
 
 function notices() {
   const out = [];
@@ -125,13 +130,15 @@ function notices() {
 }
 
 function render() {
+  const unseen = state.seen !== VERSION && state.tab !== 'updates';
   root.innerHTML = String(html`
-    <div class="page-head"><div><h2>لوحة المالك</h2><div class="sub">زبائنك واشتراكاتهم وأكوادهم — كلها محفوظة على جهازك فقط</div></div>
+    <div class="page-head"><div><h2>لوحة المالك <a href="#" class="badge badge-info upd-chip" data-tab="updates" data-version title="سجل التحديثات">الإصدار <span dir="ltr">${VERSION}</span></a></h2><div class="sub">زبائنك واشتراكاتهم وأكوادهم — كلها محفوظة على جهازك فقط</div></div>
       <div class="actions"><button class="btn btn-primary" data-act="new-customer">➕ زبون جديد</button></div></div>
     ${notices().map((n) => html`<div style="margin-bottom:12px">${n}</div>`)}
-    <div class="seg owner-tabs" role="tablist">${TABS.map(([k, t]) => html`<button type="button" role="tab" class="${k === state.tab ? 'on' : ''}" aria-selected="${String(k === state.tab)}" data-tab="${k}">${t}</button>`)}</div>
-    <div class="owner-body" data-body>${state.tab === 'key' ? keyTab() : state.tab === 'tools' ? toolsTab() : customersTab()}</div>`);
+    <div class="seg owner-tabs" role="tablist">${TABS.map(([k, t]) => html`<button type="button" role="tab" class="${k === state.tab ? 'on' : ''}" aria-selected="${String(k === state.tab)}" data-tab="${k}">${t}${k === 'updates' && unseen ? html` <span class="badge badge-warn" data-new-tab>جديد</span>` : ''}</button>`)}</div>
+    <div class="owner-body" data-body>${state.tab === 'key' ? keyTab() : state.tab === 'tools' ? toolsTab() : state.tab === 'updates' ? updatesTab() : customersTab()}</div>`);
   if (state.tab === 'customers') drawList();
+  if (state.tab === 'updates') markSeen();
   const theme = document.getElementById('theme');
   if (theme) theme.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️ فاتح' : '🌙 داكن';
 }
@@ -367,6 +374,19 @@ async function keyFileImport(file) {
     toast('تم استيراد المفتاح. افتحه بكلمة سره ✓');
     render();
   } catch (e) { toast('ملف المفتاح غير صالح', 'err'); }
+}
+
+// ─── تبويب التحديثات: رقم كل تحديث وشو تغيّر فيه ───
+function updatesTab() {
+  const since = state.seenBefore;
+  const isNew = (e) => (since ? cmpVersion(e.v, since) > 0 : e === CHANGELOG[0]);
+  const cur = CHANGELOG[0];
+  return html`<p class="note note-info" data-note="version">الإصدار الحالي من البرنامج: <b dir="ltr">${cur.v}</b> — صدر بتاريخ ${fmtDate(cur.date)}. كل تحديث جديد يُضاف هنا برقمه وشرح لما تغيّر فيه.</p>
+    <div data-updates>${CHANGELOG.map((e, i) => html`<div class="card upd${i === 0 ? ' upd-cur' : ''}" data-v="${e.v}">
+      <div class="card-h"><h3><span class="badge badge-${i === 0 ? 'ok' : 'muted'} upd-v" dir="ltr">${e.v}</span> ${e.title}${isNew(e) ? html` <span class="badge badge-warn" data-new>جديد</span>` : ''}</h3><span class="muted small">${fmtDate(e.date)}</span></div>
+      ${e.desktop ? html`<p class="muted small" data-desktop>💻 مع هذا التحديث صدر تطبيق اللابتوب <span dir="ltr">${e.desktop}</span></p>` : ''}
+      <ul class="upd-items">${e.items.map((t) => html`<li>${t}</li>`)}</ul></div>`)}</div>
+    <p class="muted small">الأرقام قبل ${NUMBERED_LATER_BEFORE} أُعطيت لاحقاً لترتيب التاريخ، ومن ${NUMBERED_LATER_BEFORE} صار كل تحديث يُرقَّم عند نشره.</p>`;
 }
 
 // ─── تبويب الأدوات ───
