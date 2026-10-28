@@ -22,6 +22,7 @@ import * as auditView from './views/audit.js';
 import * as payroll from './views/payroll.js';
 import * as stockViews from './views/stock.js';
 import * as reconcile from './views/reconcile.js';
+import * as todayView from './views/today.js';
 
 // ─── المسارات ───
 const routes = [];
@@ -71,6 +72,7 @@ on('employees/new', payroll.employeeForm);
 on('employees/:id/edit', payroll.employeeForm);
 on('employees/:id', payroll.employeeShow);
 on('reconcile', reconcile.view);
+on('today', todayView.view);
 
 function match(path) {
   const parts = path.split('/').filter(Boolean);
@@ -86,6 +88,7 @@ function match(path) {
 const NAV = [
   { ic: '🏠', t: 'الرئيسية', h: '' },
   { ic: '🖥️', t: 'الكاشير (نقطة البيع)', h: 'pos' },
+  { ic: '🗣️', t: 'ملخص اليوم', h: 'today' },
   { sec: 'المبيعات' },
   { ic: '🧾', t: 'فواتير المبيعات', h: 'sales' },
   { ic: '📝', t: 'عروض الأسعار', h: 'quotes' },

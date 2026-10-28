@@ -5,6 +5,8 @@ import { html, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, f
 import { go, setTitle, docHref } from '../nav.js';
 import { today, S, partyName, docStatus, taxAuth } from './common.js';
 import { monthlyChart } from './chart.js';
+import { summaryFacts, headline, speechParts } from '../insights.js';
+import { speak, stopSpeaking, speechSupported, voiceHint } from './speech.js';
 import { demoData } from '../demo.js';
 import { zipBytes, unzipEntries, entryBytes, entryText } from '../xlsx.js';
 
@@ -137,6 +139,8 @@ export function dashboard({ root }) {
   // شيكات مؤجلة تستحق خلال أسبوع أو تأخرت، وتكرار تعطل
   const chqs = db.docs.filter((d) => isPdc(d) && !isDate(d.cleared) && !isDate(d.bounced) && d.chequeDue <= addDays(t, 7)).sort((a, b) => a.chequeDue.localeCompare(b.chequeDue));
   const recErr = db.recurring.filter((r) => r.active !== false && r.error);
+  const facts = db.docs.length ? summaryFacts(db, B, { preset: 'today', today: t }) : null;
+  const teaser = facts ? { facts, line: headline(facts) } : null;
   const kpi = (label, value, href, sub, cls = '') => html`<a class="kpi" href="${href}"><span class="kpi-l">${label}</span><span class="kpi-v ${cls}">${value}</span>${sub ? html`<span class="kpi-s">${sub}</span>` : ''}</a>`;
   const monthLabel = `${monthName(t)} ${t.slice(0, 4)}`;
 
@@ -145,6 +149,10 @@ export function dashboard({ root }) {
       <div class="actions"><a class="btn btn-primary" href="#/sales/new">🧾 فاتورة جديدة</a><a class="btn btn-ghost" href="#/pos">🖥️ الكاشير</a><a class="btn btn-ghost" href="#/expenses/new">💸 مصروف</a></div></div>
     ${db.demo ? html`<p class="note note-info" style="margin-bottom:14px">🧪 هذه بيانات تجريبية للتجربة. عندما تكون جاهزاً: <a href="#/settings">الإعدادات</a> ← «حذف كل البيانات» ثم ابدأ بمنشأتك.</p>` : ''}
     ${needBackup ? html`<p class="note note-warn" style="margin-bottom:14px">💾 ${since == null ? 'لم تنزّل أي نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${since} يوم.`} بياناتك محفوظة على هذا الجهاز فقط. <a href="#/settings" data-backup>نزّل نسخة احتياطية الآن</a></p>` : ''}
+    ${teaser ? html`<div class="card today-teaser" style="margin-bottom:14px"><div class="card-h"><h3>🗣️ ملخص اليوم</h3><a class="small" href="#/today">التفاصيل ←</a></div>
+      <p class="today-text">${teaser.line.sales}</p>
+      <div class="actions">${speechSupported() ? html`<button class="btn btn-primary btn-sm" data-listen>🔊 اسمع الملخص</button>` : ''}${teaser.line.warnings ? html`<a class="btn btn-ghost btn-sm" href="#/today">⚠️ ${teaser.line.warnings} تنبيه</a>` : ''}</div>
+      <p class="muted small" data-listen-hint hidden></p></div>` : ''}
     ${showSteps ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🚀 خطوات البداية</h3><span class="muted small">${steps.filter((x) => x[1]).length} من ${steps.length}</span></div>
       <div class="list-mini">${steps.map(([label, done, href]) => html`<a href="${href}"><span>${done ? '✅' : '⬜'} ${label}</span>${done ? '' : html`<span class="meta">ابدأ ←</span>`}</a>`)}</div></div>` : ''}
     <div class="grid g4">
@@ -172,6 +180,20 @@ export function dashboard({ root }) {
     </div>`);
 
   monthlyChart($('[data-chart]', root), D.series);
+  const listen = $('[data-listen]', root);
+  if (listen) {
+    listen.onclick = async () => {
+      const hint = $('[data-listen-hint]', root);
+      const idle = () => { listen.textContent = '🔊 اسمع الملخص'; listen.classList.remove('speaking'); };
+      if (listen.classList.contains('speaking')) { stopSpeaking(); idle(); return; }
+      hint.hidden = true;
+      listen.classList.add('speaking');
+      listen.textContent = '⏹️ أوقف';
+      window.addEventListener('hashchange', stopSpeaking, { once: true });
+      const r = await speak(speechParts(teaser.facts), { onEnd: idle });
+      if (!r.ok) { idle(); hint.textContent = voiceHint(r.reason); hint.hidden = false; }
+    };
+  }
   const bk = $('[data-backup]', root);
   if (bk) bk.onclick = (e) => { e.preventDefault(); downloadBackup(); };
 }
