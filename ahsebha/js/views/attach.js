@@ -3,6 +3,8 @@
 import * as store from '../store.js';
 import { can } from '../auth.js';
 import { html, toast, modal, confirmBox, $, $$ } from '../ui.js';
+import { has } from '../license.js';
+import { requireFeature } from './subscription.js';
 
 const MAX_SIZE = 5 * 1024 * 1024;
 const SAFE = /^(image\/(jpeg|png|webp|gif)|application\/pdf)$/;
@@ -110,7 +112,7 @@ export async function hydrate(root, files) {
 // المستند المقفل: يمكن إضافة إثبات له، لا إزالة شيء منه
 export function filesCard(files, { add = true, hint = '' } = {}) {
   return html`<div class="card att-card" data-att><div class="card-h"><h3>📎 المرفقات${files.length ? html` <span class="muted small">(${files.length})</span>` : ''}</h3>
-    ${add && store.filesSupported() ? html`<div class="inline">${addButtons()}</div>` : ''}</div>
+    ${add && store.filesSupported() ? html`<div class="inline">${has('attach') ? addButtons() : html`<button type="button" class="btn btn-ghost btn-sm" data-att-locked>🔒 إرفاق (ضمن الاشتراك)</button>`}</div>` : ''}</div>
     ${files.length ? filesGrid(files, { del: true }) : html`<p class="muted small">${hint || 'أرفق صورة الفاتورة أو الإيصال أو ملف PDF، وبتنحفظ مع المستند على هذا الجهاز.'}</p>`}</div>`;
 }
 
@@ -136,6 +138,7 @@ export function bindFiles(root, { get, set, canDel = () => true, add = true, hin
     draw();
   });
   root.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-att-locked]')) { requireFeature('attach'); return; }
     const o = e.target.closest('[data-att-open]');
     if (o) { const f = get().find((x) => x.id === o.dataset.attOpen); if (f) openFile(f); return; }
     const rm = e.target.closest('[data-att-rm]');

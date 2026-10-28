@@ -7,6 +7,9 @@ import { today, S, partyName, docStatus, taxAuth } from './common.js';
 import { monthlyChart } from './chart.js';
 import { summaryFacts, headline, speechParts } from '../insights.js';
 import { speak, stopSpeaking, speechSupported, voiceHint } from './speech.js';
+import { banner as subscriptionBanner } from './subscription.js';
+import { has as hasFeature } from '../license.js';
+import { CONFIG } from '../plans.js';
 import { demoData } from '../demo.js';
 import { zipBytes, unzipEntries, entryBytes, entryText } from '../xlsx.js';
 
@@ -29,7 +32,7 @@ export function welcome({ root }) {
   root.innerHTML = String(html`<section class="welcome">
     <div class="hero-acc"><div class="ic">📒</div><h1>برنامج محاسبة مجاني متكامل</h1>
       <p>للمحلات والمتاجر والمؤسسات الصغيرة: بِع واشترِ وسجّل مصاريفك، والبرنامج يعمل القيود والمخزون والضريبة والتقارير عنك.</p>
-      <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button><label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label></div>
+      <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button>${CONFIG.published ? html`<a class="btn btn-ghost" href="plans.html">💳 الباقات والأسعار</a>` : ''}<label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label></div>
     </div>
     <form class="card" data-setup hidden novalidate style="max-width:720px;margin:0 auto 22px">
       <div class="card-h"><h3>بيانات منشأتك</h3><span class="muted small">يمكنك تعديلها لاحقاً من الإعدادات</span></div>
@@ -139,7 +142,7 @@ export function dashboard({ root }) {
   // شيكات مؤجلة تستحق خلال أسبوع أو تأخرت، وتكرار تعطل
   const chqs = db.docs.filter((d) => isPdc(d) && !isDate(d.cleared) && !isDate(d.bounced) && d.chequeDue <= addDays(t, 7)).sort((a, b) => a.chequeDue.localeCompare(b.chequeDue));
   const recErr = db.recurring.filter((r) => r.active !== false && r.error);
-  const facts = db.docs.length ? summaryFacts(db, B, { preset: 'today', today: t }) : null;
+  const facts = db.docs.length && hasFeature('today') ? summaryFacts(db, B, { preset: 'today', today: t }) : null;
   const teaser = facts ? { facts, line: headline(facts) } : null;
   const kpi = (label, value, href, sub, cls = '') => html`<a class="kpi" href="${href}"><span class="kpi-l">${label}</span><span class="kpi-v ${cls}">${value}</span>${sub ? html`<span class="kpi-s">${sub}</span>` : ''}</a>`;
   const monthLabel = `${monthName(t)} ${t.slice(0, 4)}`;
@@ -149,6 +152,7 @@ export function dashboard({ root }) {
       <div class="actions"><a class="btn btn-primary" href="#/sales/new">🧾 فاتورة جديدة</a><a class="btn btn-ghost" href="#/pos">🖥️ الكاشير</a><a class="btn btn-ghost" href="#/expenses/new">💸 مصروف</a></div></div>
     ${db.demo ? html`<p class="note note-info" style="margin-bottom:14px">🧪 هذه بيانات تجريبية للتجربة. عندما تكون جاهزاً: <a href="#/settings">الإعدادات</a> ← «حذف كل البيانات» ثم ابدأ بمنشأتك.</p>` : ''}
     ${needBackup ? html`<p class="note note-warn" style="margin-bottom:14px">💾 ${since == null ? 'لم تنزّل أي نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${since} يوم.`} بياناتك محفوظة على هذا الجهاز فقط. <a href="#/settings" data-backup>نزّل نسخة احتياطية الآن</a></p>` : ''}
+    ${subscriptionBanner()}
     ${teaser ? html`<div class="card today-teaser" style="margin-bottom:14px"><div class="card-h"><h3>🗣️ ملخص اليوم</h3><a class="small" href="#/today">التفاصيل ←</a></div>
       <p class="today-text">${teaser.line.sales}</p>
       <div class="actions">${speechSupported() ? html`<button class="btn btn-primary btn-sm" data-listen>🔊 اسمع الملخص</button>` : ''}${teaser.line.warnings ? html`<a class="btn btn-ghost btn-sm" href="#/today">⚠️ ${teaser.line.warnings} تنبيه</a>` : ''}</div>

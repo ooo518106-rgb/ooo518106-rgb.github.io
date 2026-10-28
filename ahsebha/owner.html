@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>لوحة المالك — احسبها</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="لوحة صاحب البرنامج: إصدار أكواد الاشتراك وإدارة الزبائن.">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-96.png" sizes="96x96" type="image/png">
+<meta name="theme-color" content="#4f46e5">
+<script>
+  // الوضع الداكن قبل رسم الصفحة حتى لا تومض
+  try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')); } catch (e) { /* الوضع الفاتح */ }
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="acc site-page">
+<!-- لا نستخدم إحصاءات هنا: بيانات زبائنك لا تغادر جهازك -->
+<header class="site-top">
+  <a class="site-brand" href="./"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">لوحة المالك</span></span></a>
+  <div class="site-top-actions">
+    <a class="btn btn-ghost btn-sm" href="./">← البرنامج</a>
+    <button type="button" class="btn btn-ghost btn-sm theme-toggle" id="theme">🌙 داكن</button>
+  </div>
+</header>
+<main class="site-wrap" id="owner">
+  <noscript><p class="note note-warn">اللوحة تحتاج تفعيل JavaScript في المتصفح.</p></noscript>
+</main>
+<div id="toasts" aria-live="polite"></div>
+<script type="module" src="js/owner.js"></script>
+</body>
+</html>

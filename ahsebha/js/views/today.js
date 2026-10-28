@@ -32,7 +32,7 @@ export function view({ root, query, path }) {
     sub: html`${when} · <span class="muted">المساعد بيحكيلك شو صار بمتجرك من أرقام دفاترك</span>`,
     actions: html`${canSpeak ? html`<button class="btn btn-primary" data-speak>🔊 اسمع الملخص</button>` : ''}<button class="btn btn-ghost" data-share>💬 واتساب</button>`,
   })}
-    <div class="seg today-tabs" role="tablist">${Object.entries(PERIODS).map(([k, p]) => html`<a role="tab" class="${k === preset ? 'on' : ''}" aria-selected="${k === preset}" href="${withQuery(path, k === 'today' ? {} : { p: k })}">${p.label}</a>`)}</div>
+    <div class="seg today-tabs" role="tablist">${Object.entries(PERIODS).map(([k, p]) => html`<a role="tab" class="${k === preset ? 'on' : ''}" aria-selected="${String(k === preset)}" href="${withQuery(path, k === 'today' ? {} : { p: k })}">${p.label}</a>`)}</div>
     <p class="note note-warn today-hint" data-hint ${canSpeak ? raw('hidden') : ''}>${canSpeak ? '' : voiceHint('unsupported')}</p>
     <div class="today-grid">${secs.map(card)}</div>
     <p class="muted small today-foot">🔒 الملخص بيتحسب على جهازك من دفاترك، وما بيطلع منه أي شي لأي مكان. أرقامه هي نفسها أرقام التقارير.</p>`);

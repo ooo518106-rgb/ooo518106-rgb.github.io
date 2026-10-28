@@ -23,6 +23,9 @@ import * as payroll from './views/payroll.js';
 import * as stockViews from './views/stock.js';
 import * as reconcile from './views/reconcile.js';
 import * as todayView from './views/today.js';
+import * as subscription from './views/subscription.js';
+import * as license from './license.js';
+import { CONFIG } from './plans.js';
 
 // ─── المسارات ───
 const routes = [];
@@ -73,6 +76,8 @@ on('employees/:id/edit', payroll.employeeForm);
 on('employees/:id', payroll.employeeShow);
 on('reconcile', reconcile.view);
 on('today', todayView.view);
+on('subscription', subscription.view);
+on('activate', subscription.activate);
 
 function match(path) {
   const parts = path.split('/').filter(Boolean);
@@ -126,13 +131,14 @@ const NAV = [
   { sec: 'الإدارة' },
   { ic: '📥', t: 'الاستيراد من Excel', h: 'import' },
   { ic: '👤', t: 'المستخدمون', h: 'users' },
+  { ic: '💳', t: 'اشتراكي', h: 'subscription', need: 'sub' },
   { ic: '⚙️', t: 'الإعدادات', h: 'settings' },
 ];
 
 // عناصر القائمة المسموحة للمستخدم الحالي، بدون عناوين أقسام فارغة
 function navItems() {
   const db = store.getDb();
-  const xs = NAV.filter((n) => n.sec || (auth.can(auth.routePerm(n.h)) && (n.need !== 'wh' || (db && db.warehouses.length))));
+  const xs = NAV.filter((n) => n.sec || (auth.can(auth.routePerm(n.h)) && (n.need !== 'wh' || (db && db.warehouses.length)) && (n.need !== 'sub' || license.enforcing()) && (CONFIG.showLockedInNav || !license.lockedFeature(n.h))));
   return xs.filter((n, i) => !n.sec || (xs[i + 1] && !xs[i + 1].sec));
 }
 
@@ -148,13 +154,16 @@ export function renderShell() {
   setSettings(db && db.settings);
   const side = document.getElementById('side');
   const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">برنامج المحاسبة</span></span></a>`;
-  const foot = html`<div class="side-foot">${installEvt ? html`<button type="button" class="btn btn-primary btn-sm side-install" data-install>📲 ثبّت البرنامج على جهازك</button>` : ''}<p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري. <a href="privacy.html">سياسة الخصوصية</a></p></div>`;
+  const foot = html`<div class="side-foot">${installEvt ? html`<button type="button" class="btn btn-primary btn-sm side-install" data-install>📲 ثبّت البرنامج على جهازك</button>` : ''}<p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري. <a href="privacy.html">سياسة الخصوصية</a>${CONFIG.published ? html` · <a href="plans.html" target="_blank" rel="noopener">الباقات</a>` : ''}</p></div>`;
   side.innerHTML = String(db
     ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
-      <nav>${navItems().map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}</a>`))}</nav>${foot}`
+      <nav>${navItems().map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a${license.lockedFeature(n.h) ? ' locked' : ''}" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}${license.lockedFeature(n.h) ? html`<span class="lk" title="ضمن الاشتراك" aria-label="ضمن الاشتراك">🔒</span>` : ''}</a>`))}</nav>${foot}`
     : html`${brand}<nav><a class="nav-a on" href="#/welcome"><span class="ic">👋</span>ابدأ هنا</a></nav>${foot}`);
   const quick = document.getElementById('quick');
-  quick.querySelectorAll('.quick-menu a').forEach((a) => { a.hidden = !auth.can(auth.routePerm(a.getAttribute('href'))); });
+  quick.querySelectorAll('.quick-menu a').forEach((a) => {
+    const f = a.dataset.feature || license.featureOfPath(a.getAttribute('href'));
+    a.hidden = !auth.can(auth.routePerm(a.getAttribute('href'))) || !!(f && !license.has(f));
+  });
   quick.hidden = !db || !quick.querySelector('.quick-menu a:not([hidden])');
   const u = auth.currentUser();
   const lockBtn = document.getElementById('lock-btn');
@@ -199,13 +208,15 @@ async function render() {
 
   const db = store.getDb();
   let r = match(path);
-  if (!db && path !== 'welcome') r = { fn: home.welcome, params: {} };
+  if (!db && path !== 'welcome' && path !== 'activate') r = { fn: home.welcome, params: {} };
   if (db && r && !auth.can(auth.routePerm(path))) {
     if (!path) { go(auth.homePath()); return; }
     setTitle('غير مسموح');
     root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🔒</div><h3>لا تملك صلاحية لهذه الصفحة</h3><p>اطلب من المالك تعديل صلاحياتك من صفحة المستخدمين.</p><p><a href="${auth.homePath()}">العودة</a></p></div>`);
     return;
   }
+  const locked = db && r ? license.lockedFeature(path) : null;
+  if (locked) { subscription.lockedPage(root, locked); return; }
   if (!r) {
     setTitle('الصفحة غير موجودة');
     root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🧭</div><h3>الصفحة غير موجودة</h3><p><a href="#/">العودة للرئيسية</a></p></div>`);
@@ -247,6 +258,7 @@ async function boot() {
   document.querySelector('.theme-toggle').onclick = toggleTheme;
   document.getElementById('lock-btn').onclick = () => auth.lock();
   await store.load();
+  await license.init().catch(() => {});
   auth.init({
     onChange: (kind) => {
       if (kind === 'lock') return;
@@ -258,6 +270,8 @@ async function boot() {
   generateRecurring();
   store.gcFiles().catch(() => {});
   window.addEventListener('hashchange', render);
+  // تفعيل اشتراك من نافذة أخرى
+  window.addEventListener('storage', (e) => { if (e.key === 'ahsebha-license' || e.key === 'ahsebha-preview') license.init().then(() => { renderShell(); if (!guard.dirty) rerender(); }).catch(() => {}); });
   window.addEventListener('beforeunload', (e) => { if (guard.dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('acc:shell', () => { auth.init(); renderShell(); });
   window.addEventListener('acc:save-failed', () => toast('تعذّر الحفظ على هذا الجهاز. صدّر نسخة احتياطية من الإعدادات فوراً', 'err'));
