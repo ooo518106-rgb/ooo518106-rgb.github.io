@@ -180,6 +180,32 @@ jobs:
           "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
           cat "$RUNNER_TEMP/smoke-dmg.json"
 
+      - name: 'اختبار قرص ماك Intel — نفس الخطوات عبر Rosetta'
+        if: matrix.name == 'mac'
+        timeout-minutes: 8
+        run: |
+          # جهاز البناء بمعالج Apple، فنشغّل نسخة Intel الموجودة داخل قرصها عبر Rosetta
+          hdiutil attach dist/Ahsebha-mac-x64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg-x64"
+          rm -rf "$RUNNER_TEMP/x64" && mkdir -p "$RUNNER_TEMP/x64"
+          cp -R "$RUNNER_TEMP/dmg-x64/Ahsebha.app" "$RUNNER_TEMP/x64/"
+          hdiutil detach "$RUNNER_TEMP/dmg-x64"
+          APP="$RUNNER_TEMP/x64/Ahsebha.app"
+          ARCHS="$(lipo -archs "$APP/Contents/MacOS/Ahsebha")"
+          echo "معمارية الملف: $ARCHS"
+          [ "$ARCHS" = "x86_64" ]
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            codesign --verify --deep --strict --verbose=2 "$APP"
+          fi
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            softwareupdate --install-rosetta --agree-to-license || true
+          fi
+          if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            arch -x86_64 "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-x64.json"
+            cat "$RUNNER_TEMP/smoke-x64.json"
+          else
+            echo "::warning::لا يتوفر Rosetta على جهاز البناء فلم تُشغَّل نسخة Intel. تأكدنا فقط أن الملف بمعمارية Intel"
+          fi
+
       - name: عرض الملفات الناتجة
         shell: bash
         run: ls -la dist
