@@ -1,4 +1,6 @@
 // ═══ القراءة بالصوت: صوت عربي من الجهاز نفسه (بدون إنترنت وبدون إرسال أي شي لأي مكان) ═══
+import { detectOS } from '../downloads.js';
+
 const synth = () => (typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window ? window.speechSynthesis : null);
 export const speechSupported = () => !!synth();
 
@@ -58,8 +60,16 @@ export async function speak(parts, { onPart, onEnd, rate = 0.95 } = {}) {
   return { ok: true };
 }
 
-export const voiceHint = (reason) => (reason === 'unsupported'
+// أين يثبّت المستخدم صوتاً عربياً حسب نظام جهازه (تطبيق سطح المكتب يستخدم أصوات النظام فقط)
+const VOICE_HOW = {
+  windows: 'إعدادات ويندوز ← الوقت واللغة ← الكلام ← «إضافة أصوات» ← العربية.',
+  mac: 'إعدادات النظام ← إمكانية الوصول ← المحتوى المنطوق ← صوت النظام ← «إدارة الأصوات» ← العربية.',
+  ios: 'الإعدادات ← إمكانية الوصول ← المحتوى المنطوق ← الأصوات ← العربية.',
+  android: 'إعدادات الجهاز ← اللغة والإدخال ← تحويل النص إلى كلام.',
+  linux: 'ثبّت حزمة صوت عربي (مثل espeak-ng) من مدير الحزم.',
+};
+export const voiceHint = (reason, os = detectOS()) => (reason === 'unsupported'
   ? 'المتصفح هاد ما بيدعم القراءة بالصوت. جرّب Chrome أو Safari.'
   : reason === 'no-arabic-voice'
-    ? 'ما لقينا صوت عربي على جهازك. جرّب من Chrome، أو ثبّت صوت عربي من إعدادات الجهاز (اللغة والإدخال ← تحويل النص إلى كلام).'
+    ? `ما لقينا صوت عربي على جهازك. ثبّت صوتاً عربياً من: ${VOICE_HOW[os] || 'إعدادات الجهاز (الكلام).'}`
     : '');

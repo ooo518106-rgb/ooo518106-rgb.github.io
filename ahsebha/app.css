@@ -687,3 +687,25 @@ html[data-role="cashier"] .page-head [data-del], html[data-role="cashier"] .page
 .site-foot a { color: var(--primary); }
 [data-theme="dark"] .site-foot a { color: #a5b4fc; }
 @media (max-width: 760px) { .site-nav { display: none; } }
+
+/* ─── تثبيت التطبيق ─── */
+.install-me { padding: 12px 14px; border: 1.5px solid var(--primary); border-radius: 12px; background: var(--info-bg); }
+.install-me h3 { font-size: 1rem; font-weight: 800; margin-bottom: 6px; }
+.install-steps { margin: 6px 0 0; padding-inline-start: 22px; display: grid; gap: 4px; line-height: 1.8; font-size: .92rem; }
+.install-others { margin-top: 12px; }
+.install-others summary { cursor: pointer; font-weight: 800; color: var(--text-muted); }
+.install-others h4 { margin: 10px 0 2px; font-size: .92rem; }
+.dl-steps { display: grid; gap: 8px; }
+.dl-steps details { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px; }
+.dl-steps summary { cursor: pointer; font-weight: 800; padding: 10px 0; list-style-position: inside; }
+.dl-steps details[open] summary { color: var(--primary); }
+.dl-steps .install-steps { padding-bottom: 12px; }
+.dl-grid { grid-template-columns: repeat(4, 1fr); }
+.dl-grid .plan-cta .btn { white-space: normal; text-align: center; }
+@media (max-width: 960px) { .dl-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .dl-grid { grid-template-columns: 1fr; } }
+.notes-list { grid-template-columns: 1fr; }
+.notes-list li::before { content: 'ℹ️ '; }
+.install-app { margin-bottom: 12px; }
+.install-alt h3 { font-size: 1rem; font-weight: 800; }
+.install-alt h4 { margin: 8px 0 0; font-size: .9rem; color: var(--text-muted); }

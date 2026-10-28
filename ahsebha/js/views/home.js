@@ -10,6 +10,7 @@ import { speak, stopSpeaking, speechSupported, voiceHint } from './speech.js';
 import { banner as subscriptionBanner } from './subscription.js';
 import { has as hasFeature } from '../license.js';
 import { CONFIG } from '../plans.js';
+import { isInstalled } from './install.js';
 import { demoData } from '../demo.js';
 import { zipBytes, unzipEntries, entryBytes, entryText } from '../xlsx.js';
 
@@ -33,6 +34,7 @@ export function welcome({ root }) {
     <div class="hero-acc"><div class="ic">📒</div><h1>برنامج محاسبة مجاني متكامل</h1>
       <p>للمحلات والمتاجر والمؤسسات الصغيرة: بِع واشترِ وسجّل مصاريفك، والبرنامج يعمل القيود والمخزون والضريبة والتقارير عنك.</p>
       <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button>${CONFIG.published ? html`<a class="btn btn-ghost" href="plans.html">💳 الباقات والأسعار</a>` : ''}<label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label></div>
+      ${isInstalled() ? '' : html`<p style="margin-top:12px"><button type="button" class="btn btn-ghost btn-sm" data-install-app>💻 ثبّت البرنامج على اللابتوب</button></p>`}
     </div>
     <form class="card" data-setup hidden novalidate style="max-width:720px;margin:0 auto 22px">
       <div class="card-h"><h3>بيانات منشأتك</h3><span class="muted small">يمكنك تعديلها لاحقاً من الإعدادات</span></div>
@@ -74,6 +76,8 @@ export function welcome({ root }) {
     go('#/');
   };
   $('[data-demo]', root).onclick = () => loadDemo();
+  const inst = $('[data-install-app]', root);
+  if (inst) inst.onclick = () => window.dispatchEvent(new Event('acc:install'));
   $('[data-restore]', root).onchange = (e) => restoreFile(e.target.files[0]);
 }
 

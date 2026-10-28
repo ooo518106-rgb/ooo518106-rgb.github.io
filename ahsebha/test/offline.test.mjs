@@ -35,7 +35,7 @@ test('الحفظ المسبق: كل ملفات البرنامج المستورد
   assert.deepEqual(missing, [], 'استيراد لملف غير موجود');
   const files = [...seen.keys()];
   assert.ok(files.length >= 45, 'عدد الملفات المحفوظة: ' + files.length);
-  for (const f of ['index.html', 'app.css', 'manifest.json', 'js/app.js', 'js/core.js', 'js/store.js', 'js/license.js', 'js/plans.js', 'js/insights.js', 'js/views/subscription.js', 'js/views/today.js', 'js/xlsx.js', 'js/imports.js', 'vendor/qrcode.js']) {
+  for (const f of ['index.html', 'app.css', 'manifest.json', 'js/app.js', 'js/core.js', 'js/store.js', 'js/license.js', 'js/plans.js', 'js/insights.js', 'js/views/subscription.js', 'js/views/install.js', 'js/views/today.js', 'js/downloads.js', 'js/xlsx.js', 'js/imports.js', 'vendor/qrcode.js']) {
     assert.ok(seen.has(f), `لا يُحفظ مسبقاً: ${f}`);
   }
 });
