@@ -82,15 +82,29 @@ jobs:
 
       - name: اختبار التثبيت الفعلي (ويندوز)
         if: matrix.name == 'windows'
-        timeout-minutes: 6
+        timeout-minutes: 8
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $installer = (Resolve-Path .\dist\Ahsebha-Setup.exe).Path
           $p = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          Write-Host "رمز خروج المثبّت: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "فشل التثبيت: رمز الخروج $($p.ExitCode)" }
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Ahsebha'
+          # أين ثُبّت؟ نسأل سجل ويندوز (مدخل إلغاء التثبيت)
+          function Get-Entry {
+            Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -like '*hsebha*' -or $_.DisplayName -like '*احسبها*' }
+          }
+          $entry = $null
+          for ($i = 0; $i -lt 60 -and -not $entry; $i++) { $entry = @(Get-Entry)[0]; if (-not $entry) { Start-Sleep -Seconds 1 } }
+          if ($entry) { $entry | Format-List DisplayName, DisplayVersion, InstallLocation, UninstallString, DisplayIcon }
+          Write-Host '--- المجلدات المحتملة ---'
+          Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Programs: $($_.FullName)" }
+          Get-ChildItem $env:ProgramFiles -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*hsebha*' } | ForEach-Object { Write-Host "ProgramFiles: $($_.FullName)" }
+          Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:ProgramFiles -Recurse -Filter 'Ahsebha.exe' -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host "exe: $($_.FullName)" }
+          if (-not $entry) { throw 'لا يوجد مدخل للبرنامج في سجل ويندوز بعد التثبيت' }
+          $dir = ($entry.InstallLocation).TrimEnd('\')
           $exe = Join-Path $dir 'Ahsebha.exe'
-          for ($i = 0; $i -lt 30 -and -not (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
           if (-not (Test-Path $exe)) { throw "لم يُثبَّت البرنامج في $dir" }
           $desktop = [Environment]::GetFolderPath('Desktop')
           $start = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
