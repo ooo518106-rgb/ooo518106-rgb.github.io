@@ -1,0 +1,124 @@
+name: تطبيق سطح المكتب
+
+# يبني برنامج احسبها لويندوز وماك ولينكس، ويشغّله فعلياً للتأكد أنه يعمل، وينشره عند الطلب.
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'انشر الإصدار على صفحة Releases'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: بناء ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows, flag: '--win' }
+          - { os: macos-latest, name: mac, flag: '--mac' }
+          - { os: ubuntu-latest, name: linux, flag: '--linux' }
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: تثبيت الأدوات
+        run: npm ci
+
+      - name: اختبار القواعد
+        run: npm test
+
+      - name: بناء ملف التثبيت
+        run: npx electron-builder ${{ matrix.flag }} --publish never
+
+      - name: اختبار التشغيل (لينكس)
+        if: matrix.name == 'linux'
+        timeout-minutes: 3
+        run: |
+          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          cat "$RUNNER_TEMP/smoke.json"
+
+      - name: اختبار التشغيل (ويندوز)
+        if: matrix.name == 'windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'smoke.json'
+          $p = Start-Process -FilePath '.\dist\win-unpacked\Ahsebha.exe' -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out }
+          if ($p.ExitCode -ne 0) { throw "فشل اختبار التشغيل: رمز الخروج $($p.ExitCode)" }
+
+      - name: اختبار التشغيل (ماك)
+        if: matrix.name == 'mac'
+        timeout-minutes: 3
+        run: |
+          ./dist/mac-arm64/Ahsebha.app/Contents/MacOS/Ahsebha --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          cat "$RUNNER_TEMP/smoke.json"
+
+      - name: عرض الملفات الناتجة
+        shell: bash
+        run: ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: نشر الإصدار
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/desktop-v') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: إنشاء الإصدار أو تحديثه
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          TAG="desktop-v${VERSION}"
+          ls -la installers
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" installers/* --clobber
+          else
+            gh release create "$TAG" installers/* --target "$GITHUB_SHA" --title "احسبها لسطح المكتب ${VERSION}" --notes-file desktop/RELEASE_NOTES.md
+          fi
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | .name + " " + (.size|tostring))'
