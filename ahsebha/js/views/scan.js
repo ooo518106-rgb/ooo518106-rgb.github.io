@@ -7,6 +7,7 @@ import { html, modal, toast, money, fmtDate, $, $$ } from '../ui.js';
 import { go, guard, docHref } from '../nav.js';
 import { toCanvas, saveUpload, sizeText } from './attach.js';
 import { today, S } from './common.js';
+import { requireFeature } from './subscription.js';
 
 // ─── رمز QR من صورة ───
 export async function qrFromImage(blob) {
@@ -220,6 +221,7 @@ function supplierOf(res) {
 
 // d: حالة نموذج المصروف الحالية
 export async function scanForExpense(d, { file } = {}) {
+  if (!(await requireFeature('scan'))) return;
   const res = await receiptDialog({ forType: 'expense', file });
   if (!res) return;
   const x = { ...d, files: [...(d.files || []), ...res.files] };
@@ -243,6 +245,7 @@ export async function scanForExpense(d, { file } = {}) {
 }
 
 export async function scanForPurchase(d, { file } = {}) {
+  if (!(await requireFeature('scan'))) return;
   const res = await receiptDialog({ forType: 'purchase', file });
   if (!res) return;
   const x = { ...d, files: [...(d.files || []), ...res.files] };
