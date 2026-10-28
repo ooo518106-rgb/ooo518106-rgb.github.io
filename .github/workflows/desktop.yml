@@ -100,6 +100,25 @@ jobs:
           xvfb-run -a ./dist/Ahsebha-linux-x64.AppImage --appimage-extract-and-run --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke-appimage.json"
           cat "$RUNNER_TEMP/smoke-appimage.json"
 
+      - name: 'اختبار العمل بدون إنترنت — الموقع الحقيقي (لينكس)'
+        if: matrix.name == 'linux'
+        timeout-minutes: 6
+        run: |
+          # كل اتصال مرفوض (وكيل غير موجود): أولاً نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          RUN="xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox"
+          CUT=--proxy-server=127.0.0.1:9
+          PROFILE="$RUNNER_TEMP/profile-real"
+          echo "--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»"
+          $RUN --smoke-offline $CUT --smoke-user-data="$RUNNER_TEMP/profile-empty" --smoke-out="$RUNNER_TEMP/real-control.json"
+          cat "$RUNNER_TEMP/real-control.json"
+          echo "--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه"
+          $RUN --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real1.json"
+          cat "$RUNNER_TEMP/real1.json"
+          node -e "const r=require(process.argv[1]); if(!(r.ok&&r.sw>=20)){console.error('لم يحفظ البرنامج نسخته');process.exit(1)}" "$RUNNER_TEMP/real1.json"
+          echo "--- التشغيل الثاني: بدون أي اتصال"
+          $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real2.json"
+          cat "$RUNNER_TEMP/real2.json"
+
       - name: اختبار التشغيل (ويندوز)
         if: matrix.name == 'windows'
         timeout-minutes: 3
@@ -147,6 +166,30 @@ jobs:
           $r = Start-Process -FilePath $exe -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
           if (Test-Path $out) { Get-Content $out }
           if ($r.ExitCode -ne 0) { throw "فشل تشغيل النسخة المثبّتة: رمز الخروج $($r.ExitCode)" }
+          # بدون إنترنت (الموقع الحقيقي والنسخة المثبّتة): نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          $cut = '--proxy-server=127.0.0.1:9'
+          $prof = Join-Path $env:RUNNER_TEMP 'profile-real'
+          $empty = Join-Path $env:RUNNER_TEMP 'profile-empty'
+          function Invoke-Smoke([string]$name, [string[]]$more) {
+            $o = Join-Path $env:RUNNER_TEMP "$name.json"
+            if (Test-Path $o) { Remove-Item $o }
+            $argList = @("--smoke-out=$o") + $more
+            $q = Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru
+            $text = if (Test-Path $o) { Get-Content $o -Raw } else { '' }
+            Write-Host "[$name] رمز الخروج $($q.ExitCode)"
+            Write-Host $text
+            if ($q.ExitCode -ne 0) { throw "فشل ($name): رمز الخروج $($q.ExitCode)" }
+            if ($text) { return ($text | ConvertFrom-Json) }
+          }
+          Write-Host '--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»'
+          $null = Invoke-Smoke 'control' @('--smoke-offline', $cut, "--smoke-user-data=$empty")
+          Write-Host '--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه'
+          $r1 = Invoke-Smoke 'real1' @('--smoke-test', "--smoke-user-data=$prof")
+          if (-not ($r1.ok -and $r1.sw -ge 20)) { throw 'لم يحفظ البرنامج نسخته للعمل بدون إنترنت' }
+          Write-Host '--- التشغيل الثاني: بدون أي اتصال'
+          $r2 = Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$prof")
+          if (-not $r2.ok) { throw 'لم يعمل البرنامج بدون إنترنت' }
+          Write-Host 'العمل بدون إنترنت على النسخة المثبّتة: سليم'
           $un = Join-Path $dir 'Uninstall Ahsebha.exe'
           if (-not (Test-Path $un)) { throw 'لا يوجد برنامج إلغاء التثبيت' }
           Start-Process -FilePath $un -ArgumentList '/S' -Wait
@@ -179,6 +222,20 @@ jobs:
           fi
           "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
           cat "$RUNNER_TEMP/smoke-dmg.json"
+          # بدون إنترنت (الموقع الحقيقي والنسخة المنسوخة إلى Applications): نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          BIN="$APP/Contents/MacOS/Ahsebha"
+          CUT=--proxy-server=127.0.0.1:9
+          PROFILE="$RUNNER_TEMP/profile-real"
+          echo "--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»"
+          "$BIN" --smoke-offline $CUT --smoke-user-data="$RUNNER_TEMP/profile-empty" --smoke-out="$RUNNER_TEMP/real-control.json"
+          cat "$RUNNER_TEMP/real-control.json"
+          echo "--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه"
+          "$BIN" --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real1.json"
+          cat "$RUNNER_TEMP/real1.json"
+          node -e "const r=require(process.argv[1]); if(!(r.ok&&r.sw>=20)){console.error('لم يحفظ البرنامج نسخته');process.exit(1)}" "$RUNNER_TEMP/real1.json"
+          echo "--- التشغيل الثاني: بدون أي اتصال"
+          "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real2.json"
+          cat "$RUNNER_TEMP/real2.json"
 
       - name: 'اختبار قرص ماك Intel — نفس الخطوات عبر Rosetta'
         if: matrix.name == 'mac'
