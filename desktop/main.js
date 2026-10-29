@@ -1,18 +1,21 @@
 'use strict';
 // ═══ احسبها لسطح المكتب: برنامج مثبّت بنافذته وأيقونته، لا يفتح في المتصفح ═══
 // يعرض واجهة البرنامج من موقعه، فكل تحديث للبرنامج يصل لك تلقائياً بدون إعادة تثبيت،
-// ويعمل بدون إنترنت بعد أول تشغيل (يحفظ نفسه على الجهاز). بياناتك المحاسبية تبقى على جهازك.
-const { app, BrowserWindow, Menu, session, shell } = require('electron');
+// ويعمل بدون إنترنت حتى من أول تشغيل: النسخة الكاملة داخل ملف التثبيت (offline-site.js).
+// بياناتك المحاسبية تبقى على جهازك.
+const { app, BrowserWindow, Menu, net, session, shell } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { makePolicy, permissionAllowed, parseArgs } = require('./policy');
+const { createOfflineSite } = require('./offline-site');
 
 const START_URL = process.env.AHSEBHA_URL || 'https://ooo518106-rgb.github.io/ahsebha/';
 const policy = makePolicy(START_URL);
 const args = parseArgs(process.argv);
 const SAFE_PREFS = { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false };
 let win = null;
+let offlineSite = null;
 
 app.setAppUserModelId('io.github.ooo518106-rgb.ahsebha');
 if (args.smoke) {
@@ -37,6 +40,14 @@ function buildMenu() {
 function lockPermissions(ses) {
   ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(policy.isApp(details.requestingUrl || wc.getURL()) && permissionAllowed(permission, details)));
   ses.setPermissionCheckHandler((wc, permission, origin, details) => policy.isOrigin(origin) && permissionAllowed(permission, details || {}));
+}
+
+// العمل بدون إنترنت من أول تشغيل: الشبكة أولاً دائماً، وعند تعذّرها نقدّم آخر نسخة محفوظة ثم النسخة المرفقة (offline-site.js)
+function setupOfflineSite(ses) {
+  if (new URL(START_URL).protocol !== 'https:') return; // اختبارات محلية على http تبقى كما هي
+  const bundleDir = app.isPackaged ? path.join(process.resourcesPath, 'ahsebha') : path.join(__dirname, '..', 'ahsebha');
+  offlineSite = createOfflineSite({ policy, startUrl: START_URL, bundleDir, storeDir: path.join(app.getPath('userData'), 'offline-site') });
+  ses.protocol.handle('https', (request) => offlineSite.respond(request, (r, init) => net.fetch(r, { ...init, bypassCustomProtocolHandlers: true })));
 }
 
 // ─── حماية كل نافذة: الرئيسية وما يفتحه البرنامج ───
@@ -129,6 +140,10 @@ const PROBE = `(async () => {
   out.sw = await (async () => {
     try {
       if (!('serviceWorker' in navigator)) return -2;
+      // التسجيل يبدأ مع تحميل الصفحة. إن لم يظهر خلال 8 ثوانٍ فلا عامل خدمة (مثل أول تشغيل بلا إنترنت)
+      let reg = null;
+      for (let i = 0; i < 32 && !(reg = await navigator.serviceWorker.getRegistration()); i++) await wait(250);
+      if (!reg) return -3;
       await Promise.race([navigator.serviceWorker.ready, wait(20000)]);
       for (let i = 0; i < 80; i++) { let n = 0; for (const k of await caches.keys()) n += (await (await caches.open(k)).keys()).length; if (n >= 20) return n; await wait(250); }
       return 0;
@@ -163,6 +178,7 @@ async function runSmoke() {
     await win.webContents.executeJavaScript(PDF_PROBE, true);
     for (let i = 0; i < 40 && !smokePdf; i++) await new Promise((res) => setTimeout(res, 250));
     r.pdf = smokePdf;
+    r.offlineSite = offlineSite ? offlineSite.snapshot() : null; // من أين جاءت ملفات البرنامج: الشبكة أم النسخة المحفوظة أم المرفقة
     // على نسخة محلية (اختبار كود هذا التعديل نفسه) نشترط أن يكون البرنامج محفوظاً للعمل بدون إنترنت
     const local = new URL(START_URL).hostname === '127.0.0.1';
     r.ok = !!(r.ui && r.secure && r.subtle && r.idb && r.ecdsa && /احسبها/.test(r.title) && policy.isApp(r.url) && smokePdf && smokePdf.head === '%PDF-' && (!local || r.sw >= 20));
@@ -183,6 +199,7 @@ if (args.smoke ? true : app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     lockPermissions(session.defaultSession);
     setupDownloads(session.defaultSession);
+    setupOfflineSite(session.defaultSession);
     // اختبار «بدون إنترنت»: لا شبكة أبداً، فيجب أن يظهر البرنامج من النسخة المحفوظة
     if (args.smokeNoNetwork) session.defaultSession.enableNetworkEmulation({ offline: true });
     buildMenu();
