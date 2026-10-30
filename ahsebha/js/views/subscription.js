@@ -188,11 +188,11 @@ export function view({ root }) {
         : e.status === 'grace' ? `انتهى ${fmtDate(e.exp)}، والميزات تعمل مدة إضافية ثم تُقفل`
           : `انتهى في ${fmtDate(e.exp)} وعدت للباقة المجانية. بياناتك كلها محفوظة.`;
     const m = e.status === 'lifetime' ? { big: '∞', small: 'اشتراك دائم', pct: 100 }
-      : e.status === 'active' ? { big: e.daysLeft, small: e.daysLeft === 1 ? 'يوم متبقٍ' : 'يوم متبقٍ', pct: total ? pctOf((e.daysLeft / total) * 100) : 100 }
+      : e.status === 'active' ? { big: e.daysLeft, small: 'يوم متبقٍ', pct: total ? pctOf((e.daysLeft / total) * 100) : 100 }
         : e.status === 'grace' ? { big: e.graceLeft, small: 'يوم مهلة إضافية', pct: pctOf((e.graceLeft / Math.max(1, CONFIG.graceDays)) * 100) }
           : { big: 0, small: 'منتهي', pct: 0 };
     const cust = e.customer ? html` · مرخّص لـ ${e.customer}` : '';
-    const acts = html`${warn ? actions(e.status === 'expired' ? 'تجديد الاشتراك' : 'تجديد الاشتراك') : ''}${clearBtn}${e.status === 'expired' ? html`<a class="btn btn-ghost btn-sm" href="#/settings">${lastBackup ? 'النسخ الاحتياطي' : 'نزّل نسخة احتياطية'}</a>` : ''}`;
+    const acts = html`${warn ? actions('تجديد الاشتراك') : ''}${clearBtn}${e.status === 'expired' ? html`<a class="btn btn-ghost btn-sm" href="#/settings">${lastBackup ? 'النسخ الاحتياطي' : 'نزّل نسخة احتياطية'}</a>` : ''}`;
     return hero({
       tone, ic: e.status === 'expired' ? 'lock' : warn ? 'triangle-alert' : 'badge-check', kicker: 'باقتك الحالية', title: e.planName,
       badge: e.status === 'expired' ? ['bad', 'منتهي'] : e.status === 'grace' ? ['warn', 'في المهلة'] : e.status === 'lifetime' ? ['info', 'دائم'] : warn ? ['warn', 'ينتهي قريباً'] : ['ok', 'ساري'],

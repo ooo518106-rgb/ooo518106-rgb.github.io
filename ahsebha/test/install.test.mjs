@@ -65,18 +65,18 @@ test('كشف نظام الجهاز لصفحة التحميل', () => {
 });
 
 test('روابط التحميل: ثابتة ومن صفحة الإصدارات الرسمية، ومطابقة لأسماء الملفات التي يبنيها البناء', () => {
-  assert.equal(downloadUrl('Ahsebha-Setup.exe'), `https://github.com/${REPO}/releases/latest/download/Ahsebha-Setup.exe`);
+  assert.equal(downloadUrl('Kenz-Setup.exe'), `https://github.com/${REPO}/releases/latest/download/Kenz-Setup.exe`);
   assert.equal(releasesUrl, `https://github.com/${REPO}/releases/latest`);
-  assert.deepEqual(DOWNLOADS.map((d) => d.file), ['Ahsebha-Setup.exe', 'Ahsebha-mac-arm64.dmg', 'Ahsebha-mac-x64.dmg', 'Ahsebha-linux-x64.AppImage']);
+  assert.deepEqual(DOWNLOADS.map((d) => d.file), ['Kenz-Setup.exe', 'Kenz-mac-arm64.dmg', 'Kenz-mac-x64.dmg', 'Kenz-linux-x64.AppImage']);
   assert.deepEqual(forOS('mac').map((d) => d.id), ['mac-arm64', 'mac-x64'], 'ماك فيه معالجان');
   assert.deepEqual(forOS('windows').map((d) => d.id), ['win']);
   assert.deepEqual(forOS('ios'), []);
   // أسماء الملفات تُشتق من إعدادات البناء الحقيقية
   const b = JSON.parse(readFileSync(new URL('../../desktop/package.json', import.meta.url), 'utf8')).build;
-  assert.equal(b.nsis.artifactName.replace('${ext}', 'exe'), 'Ahsebha-Setup.exe');
-  assert.equal(b.mac.artifactName.replace('${arch}', 'arm64').replace('${ext}', 'dmg'), 'Ahsebha-mac-arm64.dmg');
-  assert.equal(b.mac.artifactName.replace('${arch}', 'x64').replace('${ext}', 'dmg'), 'Ahsebha-mac-x64.dmg');
-  assert.equal(b.linux.artifactName.replace('${ext}', 'AppImage'), 'Ahsebha-linux-x64.AppImage');
+  assert.equal(b.nsis.artifactName.replace('${ext}', 'exe'), 'Kenz-Setup.exe');
+  assert.equal(b.mac.artifactName.replace('${arch}', 'arm64').replace('${ext}', 'dmg'), 'Kenz-mac-arm64.dmg');
+  assert.equal(b.mac.artifactName.replace('${arch}', 'x64').replace('${ext}', 'dmg'), 'Kenz-mac-x64.dmg');
+  assert.equal(b.linux.artifactName.replace('${ext}', 'AppImage'), 'Kenz-linux-x64.AppImage');
   // المستودع المذكور هو نفسه الذي ينشر فيه سير العمل
   const wf = readFileSync(new URL('../../.github/workflows/desktop.yml', import.meta.url), 'utf8');
   assert.match(wf, /gh release create/);

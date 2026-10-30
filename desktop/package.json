@@ -1,14 +1,14 @@
 {
-  "name": "ahsebha",
-  "productName": "Ahsebha",
-  "version": "1.1.0",
+  "name": "kenz",
+  "productName": "Kenz",
+  "version": "1.2.0",
   "private": true,
-  "description": "احسبها — برنامج محاسبة عربي (تطبيق سطح المكتب)",
-  "author": "احسبها",
+  "description": "كنز — برنامج محاسبة عربي (تطبيق سطح المكتب)",
+  "author": "كنز",
   "homepage": "https://ooo518106-rgb.github.io/ahsebha/",
   "license": "UNLICENSED",
   "main": "main.js",
-  "desktopName": "ahsebha.desktop",
+  "desktopName": "kenz.desktop",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
@@ -20,8 +20,8 @@
   },
   "build": {
     "appId": "io.github.ooo518106-rgb.ahsebha",
-    "productName": "Ahsebha",
-    "copyright": "احسبها",
+    "productName": "Kenz",
+    "copyright": "كنز",
     "directories": { "output": "dist", "buildResources": "build" },
     "files": ["main.js", "policy.js", "offline-site.js", "offline.html", "package.json"],
     "extraResources": [{ "from": "../ahsebha", "to": "ahsebha", "filter": ["**/*", "!store/**", "!test/**", "!package.json", "!**/*.md"] }],
@@ -37,10 +37,10 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "احسبها",
+      "shortcutName": "كنز",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
-      "artifactName": "Ahsebha-Setup.${ext}"
+      "artifactName": "Kenz-Setup.${ext}"
     },
     "mac": {
       "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
@@ -49,20 +49,20 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "artifactName": "Ahsebha-mac-${arch}.${ext}",
+      "artifactName": "Kenz-mac-${arch}.${ext}",
       "extendInfo": {
-        "CFBundleDisplayName": "احسبها",
+        "CFBundleDisplayName": "كنز",
         "NSCameraUsageDescription": "لقراءة الباركود وتصوير الإيصالات والفواتير."
       }
     },
-    "dmg": { "title": "Ahsebha" },
+    "dmg": { "title": "Kenz" },
     "linux": {
       "target": [{ "target": "AppImage", "arch": ["x64"] }],
       "icon": "build/icon.png",
       "category": "Office",
-      "executableName": "ahsebha",
+      "executableName": "kenz",
       "synopsis": "برنامج محاسبة عربي",
-      "artifactName": "Ahsebha-linux-x64.${ext}",
+      "artifactName": "Kenz-linux-x64.${ext}",
       "syncDesktopName": true
     }
   }

@@ -2,6 +2,11 @@
 // سياسة التنقل والصلاحيات لنافذة التطبيق: دوال بحتة بلا Electron، لتُختبر بسهولة.
 // القاعدة: نافذة التطبيق تعرض صفحات البرنامج فقط. أي رابط خارجه يُفتح في متصفح الجهاز.
 
+// مجلد بيانات المستخدم (فواتيره وعملاؤه): كان «Ahsebha» قبل تغيير الاسم إلى «كنز».
+// نثبّته على اسمه القديم حتى لا يفقد من ثبّت النسخة القديمة بياناته عند التحديث (ولا يتغير لو تغيّر اسم البرنامج مستقبلاً).
+const LEGACY_DATA_DIR = 'Ahsebha';
+const userDataDir = (appData) => require('path').join(appData, LEGACY_DATA_DIR);
+
 function makePolicy(startUrl) {
   const start = new URL(startUrl);
   const base = start.pathname.endsWith('/') ? start.pathname : start.pathname + '/';
@@ -44,4 +49,4 @@ function parseArgs(argv) {
   return out;
 }
 
-module.exports = { makePolicy, permissionAllowed, parseArgs };
+module.exports = { makePolicy, permissionAllowed, parseArgs, userDataDir, LEGACY_DATA_DIR };

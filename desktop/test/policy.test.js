@@ -2,7 +2,8 @@
 // اختبارات سياسة نافذة التطبيق: ما يفتح داخلها وما يخرج للمتصفح وما يُسمح للصفحة بطلبه
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makePolicy, permissionAllowed, parseArgs } = require('../policy');
+const path = require('node:path');
+const { makePolicy, permissionAllowed, parseArgs, userDataDir, LEGACY_DATA_DIR } = require('../policy');
 
 const HOST = 'https://ooo518106-rgb.github.io';
 const P = makePolicy(`${HOST}/ahsebha/`);
@@ -65,4 +66,19 @@ test('بيئة التطوير المحلية: نفس القواعد على عن�
   assert.equal(L.isApp('http://127.0.0.1:8765/'), false);
   assert.equal(L.isApp('http://127.0.0.1:9999/ahsebha/'), false);
   assert.equal(L.isOrigin('http://127.0.0.1:8765'), true);
+});
+
+test('كنز: الاسم الجديد لا يمسّ بيانات من ثبّت النسخة القديمة (احسبها)', () => {
+  // مجلد البيانات يبقى على اسمه القديم مهما كان اسم المنتج
+  assert.equal(LEGACY_DATA_DIR, 'Ahsebha');
+  assert.equal(userDataDir('/home/u/.config'), path.join('/home/u/.config', 'Ahsebha'));
+  assert.equal(userDataDir('C:\\Users\\u\\AppData\\Roaming'), path.join('C:\\Users\\u\\AppData\\Roaming', 'Ahsebha'));
+  const pkg = require('../package.json');
+  assert.equal(pkg.productName, 'Kenz');
+  assert.equal(pkg.build.productName, 'Kenz');
+  assert.equal(pkg.build.nsis.shortcutName, 'كنز');
+  assert.equal(pkg.build.mac.extendInfo.CFBundleDisplayName, 'كنز');
+  // المعرّف التقني ثابت: يبقى التحديث فوق التثبيت القديم نفسه (ويندوز يتعرف عليه من المعرّف)
+  assert.equal(pkg.build.appId, 'io.github.ooo518106-rgb.ahsebha');
+  assert.match(require('node:fs').readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8'), /app\.setAppUserModelId\('io\.github\.ooo518106-rgb\.ahsebha'\)/);
 });

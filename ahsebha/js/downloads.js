@@ -2,10 +2,10 @@
 export const REPO = 'ooo518106-rgb/ooo518106-rgb.github.io';
 
 export const DOWNLOADS = [
-  { id: 'win', os: 'windows', icon: '🪟', name: 'ويندوز', note: 'ويندوز 10 أو 11', file: 'Ahsebha-Setup.exe' },
-  { id: 'mac-arm64', os: 'mac', icon: '🍎', name: 'ماك — معالج Apple', note: 'الأجهزة الحديثة، من M1 وما بعده', file: 'Ahsebha-mac-arm64.dmg' },
-  { id: 'mac-x64', os: 'mac', icon: '🍎', name: 'ماك — معالج Intel', note: 'الأجهزة الأقدم', file: 'Ahsebha-mac-x64.dmg' },
-  { id: 'linux', os: 'linux', icon: '🐧', name: 'لينكس', note: 'ملف AppImage', file: 'Ahsebha-linux-x64.AppImage' },
+  { id: 'win', os: 'windows', icon: '🪟', name: 'ويندوز', note: 'ويندوز 10 أو 11', file: 'Kenz-Setup.exe' },
+  { id: 'mac-arm64', os: 'mac', icon: '🍎', name: 'ماك — معالج Apple', note: 'الأجهزة الحديثة، من M1 وما بعده', file: 'Kenz-mac-arm64.dmg' },
+  { id: 'mac-x64', os: 'mac', icon: '🍎', name: 'ماك — معالج Intel', note: 'الأجهزة الأقدم', file: 'Kenz-mac-x64.dmg' },
+  { id: 'linux', os: 'linux', icon: '🐧', name: 'لينكس', note: 'ملف AppImage', file: 'Kenz-linux-x64.AppImage' },
 ];
 
 export const downloadUrl = (file) => `https://github.com/${REPO}/releases/latest/download/${file}`;

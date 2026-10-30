@@ -225,7 +225,9 @@ function renderTabbar() {
   const bar = document.getElementById('tabbar');
   const db = store.getDb();
   const hasNew = quickLinks().length > 0;
-  const tabs = TABS.filter((x) => x.more || (x.add ? hasNew : auth.can(auth.routePerm(x.h)) && !license.lockedFeature(x.h)));
+  // من لا يملك صلاحية الرئيسية (الكاشير مثلاً) تبدأ شريطه بالكاشير بدلها
+  const list = auth.can(auth.routePerm('')) ? TABS : [{ ic: 'monitor', t: 'الكاشير', h: 'pos' }, ...TABS.slice(1)];
+  const tabs = list.filter((x) => x.more || (x.add ? hasNew : auth.can(auth.routePerm(x.h)) && !license.lockedFeature(x.h)));
   bar.hidden = !db;
   bar.innerHTML = String(html`${tabs.map((x) => (x.add
     ? html`<button type="button" class="tab tab-add" data-tab="add" aria-label="جديد"><span class="tab-plus">${raw(icon('plus'))}</span></button>`
@@ -255,7 +257,7 @@ const hidesTabbar = (path) => /(^|\/)(new|edit)$/.test(path) || path === 'pos' |
 // ─── البحث السريع (Ctrl+K): صفحات وتقارير وإجراءات وعملاء ومنتجات ومستندات ───
 function openSearch() {
   const db = store.getDb();
-  if (!db || auth.isLocked()) return;
+  if (!db || auth.isLocked() || document.querySelector('dialog[open]:not(.pal)')) return; // لا بحث فوق نافذة أخرى مفتوحة
   const pages = navItems().filter((n) => !n.sec).map((n) => ({ ic: iconFor(n.ic) || 'file-text', t: n.t, h: n.h, locked: !!license.lockedFeature(n.h) }));
   if (auth.can(auth.routePerm('reports')) && !license.lockedFeature('reports')) {
     for (const r of reports.REPORTS) if (!r.sec) pages.push({ ic: iconFor(r.icon) || 'chart-column', t: r.t, h: r.href ? r.href.replace(/^#\//, '') : 'reports/' + r.id });

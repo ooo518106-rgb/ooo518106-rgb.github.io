@@ -1,6 +1,6 @@
 name: تطبيق سطح المكتب
 
-# يبني برنامج احسبها لويندوز وماك ولينكس، ويشغّله فعلياً للتأكد أنه يعمل، وينشره عند الطلب.
+# يبني برنامج كنز لويندوز وماك ولينكس، ويشغّله فعلياً للتأكد أنه يعمل، وينشره عند الطلب.
 on:
   pull_request:
     paths:
@@ -59,8 +59,9 @@ jobs:
         if: matrix.name == 'linux'
         timeout-minutes: 3
         run: |
-          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          xvfb-run -a ./dist/linux-unpacked/kenz --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
           cat "$RUNNER_TEMP/smoke.json"
+          node ci/check.js "$RUNNER_TEMP/smoke.json" "r.ok && r.productName === 'Kenz' && r.pinnedUserData.endsWith('Ahsebha')" "الاسم الجديد، وبيانات المستخدم في مجلدها القديم"
 
       - name: اختبار صفحة «لا يوجد اتصال» (لينكس)
         if: matrix.name == 'linux'
@@ -68,7 +69,7 @@ jobs:
         env:
           AHSEBHA_URL: http://127.0.0.1:1/ahsebha/
         run: |
-          xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox --smoke-offline --smoke-out="$RUNNER_TEMP/smoke-offline.json"
+          xvfb-run -a ./dist/linux-unpacked/kenz --no-sandbox --smoke-offline --smoke-out="$RUNNER_TEMP/smoke-offline.json"
           cat "$RUNNER_TEMP/smoke-offline.json"
 
       - name: اختبار العمل بدون إنترنت (لينكس) — نسخة هذا التعديل نفسها
@@ -81,7 +82,7 @@ jobs:
           sleep 2
           curl -sf http://127.0.0.1:8765/ahsebha/ >/dev/null
           export AHSEBHA_URL=http://127.0.0.1:8765/ahsebha/
-          APP=./desktop/dist/linux-unpacked/ahsebha
+          APP=./desktop/dist/linux-unpacked/kenz
           PROFILE="$RUNNER_TEMP/profile"
           echo "--- التشغيل الأول: بإنترنت، يحفظ البرنامج نفسه"
           xvfb-run -a $APP --no-sandbox --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/run1.json"
@@ -96,8 +97,8 @@ jobs:
         if: matrix.name == 'linux'
         timeout-minutes: 3
         run: |
-          chmod +x ./dist/Ahsebha-linux-x64.AppImage
-          xvfb-run -a ./dist/Ahsebha-linux-x64.AppImage --appimage-extract-and-run --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke-appimage.json"
+          chmod +x ./dist/Kenz-linux-x64.AppImage
+          xvfb-run -a ./dist/Kenz-linux-x64.AppImage --appimage-extract-and-run --no-sandbox --smoke-test --smoke-out="$RUNNER_TEMP/smoke-appimage.json"
           cat "$RUNNER_TEMP/smoke-appimage.json"
 
       - name: 'اختبار العمل بدون إنترنت — الموقع الحقيقي (لينكس)'
@@ -107,7 +108,7 @@ jobs:
           # كل اتصال مرفوض (وكيل غير موجود). نتأكد أن النسخة الكاملة داخل التطبيق، وأنه يعمل بدون إنترنت من أول تشغيل ومن بعده
           test -f ./dist/linux-unpacked/resources/ahsebha/index.html
           test -f ./dist/linux-unpacked/resources/ahsebha/vendor/ocr/ara.traineddata.gz
-          RUN="xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox"
+          RUN="xvfb-run -a ./dist/linux-unpacked/kenz --no-sandbox"
           CUT=--proxy-server=127.0.0.1:9
           FIRST="$RUNNER_TEMP/profile-first"
           REAL="$RUNNER_TEMP/profile-real"
@@ -136,7 +137,7 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'smoke.json'
-          $p = Start-Process -FilePath '.\dist\win-unpacked\Ahsebha.exe' -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
+          $p = Start-Process -FilePath '.\dist\win-unpacked\Kenz.exe' -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
           if (Test-Path $out) { Get-Content $out }
           if ($p.ExitCode -ne 0) { throw "فشل اختبار التشغيل: رمز الخروج $($p.ExitCode)" }
 
@@ -146,23 +147,23 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path .\dist\Ahsebha-Setup.exe).Path
+          $installer = (Resolve-Path .\dist\Kenz-Setup.exe).Path
           $p = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
           Write-Host "رمز خروج المثبّت: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { throw "فشل التثبيت: رمز الخروج $($p.ExitCode)" }
           # أين ثُبّت؟ نسأل سجل ويندوز (مدخل إلغاء التثبيت)
           function Get-Entry {
             Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-              Where-Object { $_.DisplayName -like '*hsebha*' -or $_.DisplayName -like '*احسبها*' }
+              Where-Object { $_.DisplayName -like '*Kenz*' -or $_.DisplayName -like '*كنز*' }
           }
           $entry = $null
           for ($i = 0; $i -lt 60 -and -not $entry; $i++) { $entry = @(Get-Entry)[0]; if (-not $entry) { Start-Sleep -Seconds 1 } }
           if ($entry) { $entry | Format-List DisplayName, DisplayVersion, InstallLocation, UninstallString, DisplayIcon }
           Write-Host '--- المجلدات المحتملة ---'
           Get-ChildItem "$env:LOCALAPPDATA\Programs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Programs: $($_.FullName)" }
-          Get-ChildItem $env:ProgramFiles -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*hsebha*' } | ForEach-Object { Write-Host "ProgramFiles: $($_.FullName)" }
+          Get-ChildItem $env:ProgramFiles -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*Kenz*' } | ForEach-Object { Write-Host "ProgramFiles: $($_.FullName)" }
           if (-not $entry) { throw 'لا يوجد مدخل للبرنامج في سجل ويندوز بعد التثبيت' }
-          # مسار الأيقونة في مدخل ويندوز هو مسار البرنامج المثبّت (مثل ...\Ahsebha.exe,0)
+          # مسار الأيقونة في مدخل ويندوز هو مسار البرنامج المثبّت (مثل ...\Kenz.exe,0)
           $exe = ($entry.DisplayIcon -replace ',\d+$', '').Trim('"')
           $dir = Split-Path $exe
           Write-Host "مكان التثبيت: $dir"
@@ -171,12 +172,15 @@ jobs:
           $start = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
           Write-Host "سطح المكتب: $desktop"; Get-ChildItem $desktop -Filter *.lnk | ForEach-Object { Write-Host "  $($_.Name)" }
           Write-Host "قائمة ابدأ: $start"; Get-ChildItem $start -Filter *.lnk | ForEach-Object { Write-Host "  $($_.Name)" }
-          if (-not (Test-Path (Join-Path $desktop 'احسبها.lnk'))) { throw 'لا يوجد اختصار «احسبها» على سطح المكتب' }
-          if (-not (Test-Path (Join-Path $start 'احسبها.lnk'))) { throw 'لا يوجد اختصار «احسبها» في قائمة ابدأ' }
+          if (-not (Test-Path (Join-Path $desktop 'كنز.lnk'))) { throw 'لا يوجد اختصار «كنز» على سطح المكتب' }
+          if (-not (Test-Path (Join-Path $start 'كنز.lnk'))) { throw 'لا يوجد اختصار «كنز» في قائمة ابدأ' }
           $out = Join-Path $env:RUNNER_TEMP 'smoke-installed.json'
           $r = Start-Process -FilePath $exe -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
           if (Test-Path $out) { Get-Content $out }
           if ($r.ExitCode -ne 0) { throw "فشل تشغيل النسخة المثبّتة: رمز الخروج $($r.ExitCode)" }
+          $nameCheck = "r.ok && r.productName === 'Kenz' && r.pinnedUserData.endsWith('Ahsebha')"
+          node ci/check.js $out $nameCheck 'الاسم الجديد، وبيانات المستخدم في مجلدها القديم'
+          if ($LASTEXITCODE -ne 0) { throw 'اسم البرنامج أو مجلد بياناته غير صحيح' }
           # بدون إنترنت (الموقع الحقيقي والنسخة المثبّتة): نتأكد أن النسخة الكاملة داخل التثبيت، وأن التطبيق يعمل بدون إنترنت من أول تشغيل ومن بعده
           if (-not (Test-Path (Join-Path $dir 'resources\ahsebha\index.html'))) { throw 'النسخة الكاملة للبرنامج ليست داخل التثبيت' }
           $cut = '--proxy-server=127.0.0.1:9'
@@ -205,41 +209,42 @@ jobs:
           Write-Host '--- تشغيل بدون إنترنت بعد تشغيل بإنترنت'
           Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$real") 'r.ok' 'بدون إنترنت بعد تشغيل بإنترنت'
           Write-Host 'العمل بدون إنترنت على النسخة المثبّتة: سليم'
-          $un = Join-Path $dir 'Uninstall Ahsebha.exe'
+          $un = Join-Path $dir 'Uninstall Kenz.exe'
           if (-not (Test-Path $un)) { throw 'لا يوجد برنامج إلغاء التثبيت' }
           Start-Process -FilePath $un -ArgumentList '/S' -Wait
           for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path $exe) { throw 'لم يُحذف البرنامج بعد إلغاء التثبيت' }
-          if (Test-Path (Join-Path $desktop 'احسبها.lnk')) { throw 'بقي الاختصار على سطح المكتب بعد إلغاء التثبيت' }
+          if (Test-Path (Join-Path $desktop 'كنز.lnk')) { throw 'بقي الاختصار على سطح المكتب بعد إلغاء التثبيت' }
           Write-Host 'تثبيت وتشغيل وإلغاء تثبيت: سليم'
 
       - name: اختبار التشغيل (ماك)
         if: matrix.name == 'mac'
         timeout-minutes: 3
         run: |
-          ./dist/mac-arm64/Ahsebha.app/Contents/MacOS/Ahsebha --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
+          ./dist/mac-arm64/Kenz.app/Contents/MacOS/Kenz --smoke-test --smoke-out="$RUNNER_TEMP/smoke.json"
           cat "$RUNNER_TEMP/smoke.json"
 
       - name: 'اختبار القرص (ماك) — تركيب ونسخ إلى Applications وتشغيل'
         if: matrix.name == 'mac'
         timeout-minutes: 5
         run: |
-          hdiutil attach dist/Ahsebha-mac-arm64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg"
+          hdiutil attach dist/Kenz-mac-arm64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg"
           ls "$RUNNER_TEMP/dmg"
-          rm -rf "$HOME/Applications/Ahsebha.app" && mkdir -p "$HOME/Applications"
-          cp -R "$RUNNER_TEMP/dmg/Ahsebha.app" "$HOME/Applications/"
+          rm -rf "$HOME/Applications/Kenz.app" && mkdir -p "$HOME/Applications"
+          cp -R "$RUNNER_TEMP/dmg/Kenz.app" "$HOME/Applications/"
           hdiutil detach "$RUNNER_TEMP/dmg"
-          APP="$HOME/Applications/Ahsebha.app"
+          APP="$HOME/Applications/Kenz.app"
           plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundleDisplayName|CFBundleName|NSCameraUsageDescription|CFBundleIdentifier'
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             codesign -dv "$APP" 2>&1 | grep -E 'Signature|Identifier' || true
             codesign --verify --deep --strict --verbose=2 "$APP"
           fi
-          "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
+          "$APP/Contents/MacOS/Kenz" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
           cat "$RUNNER_TEMP/smoke-dmg.json"
+          node ci/check.js "$RUNNER_TEMP/smoke-dmg.json" "r.ok && r.productName === 'Kenz' && r.pinnedUserData.endsWith('Ahsebha')" "الاسم الجديد، وبيانات المستخدم في مجلدها القديم"
           # بدون إنترنت (الموقع الحقيقي والنسخة المنسوخة إلى Applications): نتأكد أن النسخة الكاملة داخل التطبيق، وأنه يعمل بدون إنترنت من أول تشغيل ومن بعده
           test -f "$APP/Contents/Resources/ahsebha/index.html"
-          BIN="$APP/Contents/MacOS/Ahsebha"
+          BIN="$APP/Contents/MacOS/Kenz"
           CUT=--proxy-server=127.0.0.1:9
           FIRST="$RUNNER_TEMP/profile-first"
           REAL="$RUNNER_TEMP/profile-real"
@@ -267,12 +272,12 @@ jobs:
         timeout-minutes: 8
         run: |
           # جهاز البناء بمعالج Apple، فنشغّل نسخة Intel الموجودة داخل قرصها عبر Rosetta
-          hdiutil attach dist/Ahsebha-mac-x64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg-x64"
+          hdiutil attach dist/Kenz-mac-x64.dmg -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg-x64"
           rm -rf "$RUNNER_TEMP/x64" && mkdir -p "$RUNNER_TEMP/x64"
-          cp -R "$RUNNER_TEMP/dmg-x64/Ahsebha.app" "$RUNNER_TEMP/x64/"
+          cp -R "$RUNNER_TEMP/dmg-x64/Kenz.app" "$RUNNER_TEMP/x64/"
           hdiutil detach "$RUNNER_TEMP/dmg-x64"
-          APP="$RUNNER_TEMP/x64/Ahsebha.app"
-          ARCHS="$(lipo -archs "$APP/Contents/MacOS/Ahsebha")"
+          APP="$RUNNER_TEMP/x64/Kenz.app"
+          ARCHS="$(lipo -archs "$APP/Contents/MacOS/Kenz")"
           echo "معمارية الملف: $ARCHS"
           [ "$ARCHS" = "x86_64" ]
           if [ "${{ github.event_name }}" != "pull_request" ]; then
@@ -283,10 +288,10 @@ jobs:
           fi
           test -f "$APP/Contents/Resources/ahsebha/index.html"
           if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
-            arch -x86_64 "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-x64.json"
+            arch -x86_64 "$APP/Contents/MacOS/Kenz" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-x64.json"
             cat "$RUNNER_TEMP/smoke-x64.json"
             echo "--- أول تشغيل بدون أي إنترنت (نسخة Intel): يجب أن يظهر البرنامج من النسخة المرفقة"
-            arch -x86_64 "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-no-network --proxy-server=127.0.0.1:9 --smoke-user-data="$RUNNER_TEMP/profile-x64" --smoke-out="$RUNNER_TEMP/first-x64.json"
+            arch -x86_64 "$APP/Contents/MacOS/Kenz" --smoke-test --smoke-no-network --proxy-server=127.0.0.1:9 --smoke-user-data="$RUNNER_TEMP/profile-x64" --smoke-out="$RUNNER_TEMP/first-x64.json"
             node ci/check.js "$RUNNER_TEMP/first-x64.json" "r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0" "نسخة Intel: أول تشغيل بدون إنترنت"
           else
             echo "::warning::لا يتوفر Rosetta على جهاز البناء فلم تُشغَّل نسخة Intel. تأكدنا فقط أن الملف بمعمارية Intel"
@@ -332,6 +337,6 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" installers/* --clobber
           else
-            gh release create "$TAG" installers/* --target "$GITHUB_SHA" --title "احسبها لسطح المكتب ${VERSION}" --notes-file desktop/RELEASE_NOTES.md
+            gh release create "$TAG" installers/* --target "$GITHUB_SHA" --title "كنز لسطح المكتب ${VERSION}" --notes-file desktop/RELEASE_NOTES.md
           fi
           gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | .name + " " + (.size|tostring))'
