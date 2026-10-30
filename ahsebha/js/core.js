@@ -66,12 +66,17 @@ export function num(x) {
 }
 
 // تقريب نصف لأعلى بعيداً عن الصفر، مع إزالة أخطاء الفاصلة العائمة (1.005 → 1.01)
+// الأصل: Math.round(Number((|x|·10^d).toPrecision(15))) — النص أبطأ بكثير، فلا نمرّ به إلا إذا كان الكسر قريباً من المنتصف
+// (حيث قد يغيّر تقريب الـ15 خانة النتيجة). تطابقها مع الأصل مختبر على ملايين المدخلات في test/core.test.mjs
+const P10 = [1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8];
 export function round(x, d = 2) {
   const v = Number(x);
   if (!Number.isFinite(v)) return 0;
-  const f = 10 ** d;
-  const r = Math.round(Number((Math.abs(v) * f).toPrecision(15))) / f;
-  return v < 0 ? (-r || 0) : r;
+  const f = P10[d] || 10 ** d;
+  const a = Math.abs(v) * f;
+  const r = Math.abs(a - Math.floor(a) - 0.5) > a * 1e-14 + 1e-12 ? Math.round(a) : Math.round(Number(a.toPrecision(15)));
+  const out = r / f;
+  return v < 0 ? (-out || 0) : out;
 }
 const qround = (x) => round(x, 6);
 
@@ -452,6 +457,8 @@ export function buildBooks(db, opts = {}) {
   const accounts = accountMap(db);
   const products = new Map((db.products || []).map((p) => [p.id, p]));
   const parties = new Map((db.parties || []).map((p) => [p.id, p]));
+  const docById = new Map(); // لمرتجعاتها: البحث الخطي عن الفاتورة الأصلية لكل مرتجع كان يبطئ مع الآلاف
+  for (const d of db.docs || []) if (!docById.has(d.id)) docById.set(d.id, d);
   const assets = (db.assets || []).filter((a) => a && a.id && accounts.has(a.account));
   const schedules = new Map(assets.map((a) => [a.id, assetSchedule(a, { startDate: S.startDate, dec })]));
 
@@ -656,7 +663,7 @@ export function buildBooks(db, opts = {}) {
       if (rest) { add('ar', rest, 'cr'); issues.push({ doc: d.id, msg: 'مرتجع بلا عميل ولم يُرد مبلغه' }); }
     }
     // يرجع للمخزون بتكلفته الأصلية إن وُجدت الفاتورة الأصلية
-    const ref = d.refId ? (db.docs || []).find((x) => x.id === d.refId) : null;
+    const ref = d.refId ? docById.get(d.refId) || null : null;
     const refCosts = ref ? lineCosts.get(ref.id) || [] : [];
     const costs = (d.lines || []).map((l, i) => {
       const p = products.get(l.product);

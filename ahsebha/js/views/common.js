@@ -261,13 +261,13 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const ref = d.refId ? store.findDoc(d.refId) : null;
   const qr = s.country === 'SA' && s.vat && (d.type === 'sale' || d.type === 'sreturn') && d.no ? qrSVG(zatcaInvoiceQR(s, d, T), 120) : '';
   const partyLabel = { sale: ['العميل', 'Customer'], quote: ['مقدم إلى', 'Quoted to'], sreturn: ['العميل', 'Customer'], purchase: ['المورد', 'Supplier'], preturn: ['المورد', 'Supplier'], sorder: ['العميل', 'Customer'], porder: ['إلى المورد', 'Supplier'] }[d.type];
-  const partyBox = party ? html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${party.name}</div>
+  const partyBox = party ? html`<div><h2>${L(...partyLabel)}</h2><div class="nm">${party.name}</div>
       ${bi && party.nameEn ? html`<div class="pp-en-name"><span dir="ltr">${party.nameEn}</span></div>` : ''}
       ${party.vatNo ? html`<div>${lbl2('الرقم الضريبي', taxNoEn(s), bi)}: <b dir="ltr">${party.vatNo}</b></div>` : ''}
       ${party.crNo ? html`<div>${lbl2('السجل التجاري', 'CR No.', bi)}: <span dir="ltr">${party.crNo}</span></div>` : ''}
       ${party.address ? html`<div>${party.address}</div>` : ''}
       ${party.phone ? html`<div class="muted"><span dir="ltr">${party.phone}</span></div>` : ''}</div>`
-    : html`<div><h4>${L(...partyLabel)}</h4><div class="nm">${isSale ? L('عميل نقدي', 'Cash customer') : L('مورد نقدي', 'Cash supplier')}</div></div>`;
+    : html`<div><h2>${L(...partyLabel)}</h2><div class="nm">${isSale ? L('عميل نقدي', 'Cash customer') : L('مورد نقدي', 'Cash supplier')}</div></div>`;
 
   const lineRows = (d.lines || []).map((l, i) => {
     const X = T.lines[i];
@@ -338,7 +338,7 @@ export function deliveryPaper(d) {
       ${meta(L('المرجع', 'Reference'), html`<span dir="ltr">${d.no ? docNo(d, s) : 'مسودة'}</span>`)}
       ${meta(L('التاريخ', 'Date'), fmtDate(d.deliveryDate || d.date))}
     </div>
-    <div class="pp-party"><div><h4>${L('العميل', 'Customer')}</h4><div class="nm">${party ? party.name : 'عميل نقدي'}</div>
+    <div class="pp-party"><div><h2>${L('العميل', 'Customer')}</h2><div class="nm">${party ? party.name : 'عميل نقدي'}</div>
       ${party && party.address ? html`<div>${party.address}</div>` : ''}${party && party.phone ? html`<div class="muted"><span dir="ltr">${party.phone}</span></div>` : ''}</div></div>
     <table class="pp-lines"><thead><tr><th class="c-n">#</th><th>${L('الصنف', 'Item')}</th><th class="num">${L('الكمية', 'Qty')}</th><th>${L('ملاحظات', 'Notes')}</th></tr></thead>
       <tbody>${(d.lines || []).map((l, i) => html`<tr><td class="c-n">${i + 1}</td><td>${l.desc || productName(l.product) || 'بند'}</td><td class="num">${qty(l.qty)}${l.unit ? ' ' + l.unit : ''}</td><td></td></tr>`)}</tbody></table>

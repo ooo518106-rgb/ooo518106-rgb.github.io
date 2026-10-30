@@ -15,11 +15,13 @@ export function productList({ root, query }) {
   setTitle('المنتجات والخدمات');
   const db = store.getDb();
   const state = { q: query.q || '', f: query.f || '' };
-  const all = db.products.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  let limit = 300;
+  const AR = new Intl.Collator('ar'); // localeCompare ينشئ مرصّفاً جديداً في كل مقارنة: أبطأ بكثير مع آلاف الأصناف
+  const all = db.products.slice().sort((a, b) => AR.compare(a.name, b.name));
   root.innerHTML = String(html`
     ${head('المنتجات والخدمات', { sub: `${all.length} صنف`, actions: html`<a class="btn btn-ghost" href="#/import?type=products">📥 استيراد Excel</a><a class="btn btn-ghost" href="#/labels">🏷️ ملصقات باركود</a><a class="btn btn-ghost" href="#/adjustments/new">⚖️ جرد / تسوية</a><a class="btn btn-primary" href="#/products/new">➕ منتج جديد</a>` })}
     <div class="toolbar"><input class="inp grow" type="search" data-q placeholder="بحث بالاسم أو الرمز" value="${state.q}">
-      <select class="inp" data-f><option value="">كل الأصناف</option><option value="stock">المنتجات المخزنية</option><option value="service">الخدمات</option><option value="low">قاربت على النفاد</option><option value="off">الموقوفة</option></select>
+      <select class="inp" data-f aria-label="تصفية الأصناف"><option value="">كل الأصناف</option><option value="stock">المنتجات المخزنية</option><option value="service">الخدمات</option><option value="low">قاربت على النفاد</option><option value="off">الموقوفة</option></select>
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
     <div data-out></div>`);
   $('[data-f]', root).value = state.f;
@@ -42,19 +44,22 @@ export function productList({ root, query }) {
     const value = rows.reduce((t, p) => t + (p.type === 'stock' ? stockOf(p.id).value : 0), 0);
     out.innerHTML = String(html`<div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>قيمة المخزون بالتكلفة: <b>${money(value, { sym: true })}</b></span></div>
       ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="hide-sm">الباركود / الرمز</th><th class="num">سعر البيع</th><th class="num hide-sm">متوسط التكلفة</th><th class="num">الكمية</th><th class="num hide-sm">القيمة</th></tr></thead>
-      <tbody>${rows.map((p) => { const s = stockOf(p.id); const low = p.type === 'stock' && num(p.reorder) > 0 && s.qty <= num(p.reorder);
+      <tbody>${rows.slice(0, limit).map((p) => { const s = stockOf(p.id); const low = p.type === 'stock' && num(p.reorder) > 0 && s.qty <= num(p.reorder);
         return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
           <td class="hide-sm code" dir="ltr">${p.barcode || p.sku || ''}</td><td class="num">${money(p.price)}</td><td class="num hide-sm">${p.type === 'stock' ? money(avgCost(p)) : '—'}</td>
           <td class="num">${p.type === 'stock' ? html`<span class="${s.qty < 0 ? 'neg' : low ? 'neg' : ''}">${qty(s.qty)}</span>${low ? html` <span class="badge badge-bad">نفاد</span>` : ''}` : '—'}</td>
-          <td class="num hide-sm">${p.type === 'stock' ? money(s.value) : '—'}</td></tr>`; })}</tbody></table></div>`
+          <td class="num hide-sm">${p.type === 'stock' ? money(s.value) : '—'}</td></tr>`; })}</tbody></table></div>
+      ${rows.length > limit ? html`<p style="text-align:center;margin-top:12px"><button class="btn btn-ghost" data-more>عرض المزيد (${rows.length - limit})</button></p>` : ''}`
       : html`<div class="empty"><p>لا توجد نتائج مطابقة.</p></div>`}`);
   }
   draw();
   bindRows(root);
   const sync = () => history.replaceState(null, '', '#/products?' + new URLSearchParams({ q: state.q, f: state.f }).toString());
-  $('[data-q]', root).oninput = (e) => { state.q = e.target.value; draw(); sync(); };
-  $('[data-f]', root).onchange = (e) => { state.f = e.target.value; draw(); sync(); };
-  $('[data-csv]', root).onclick = () => { const t = $('[data-table]', root); if (t) exportTable(t, csvName('المنتجات')); };
+  $('[data-q]', root).oninput = (e) => { state.q = e.target.value; limit = 300; draw(); sync(); };
+  $('[data-f]', root).onchange = (e) => { state.f = e.target.value; limit = 300; draw(); sync(); };
+  root.addEventListener('click', (e) => { if (e.target.closest('[data-more]')) { limit += 300; draw(); } });
+  // التصدير لكل الأصناف المطابقة لا للمعروض فقط
+  $('[data-csv]', root).onclick = () => { const keep = limit; limit = Infinity; draw(); const t = $('[data-table]', root); if (t) exportTable(t, csvName('المنتجات')); limit = keep; draw(); };
 }
 
 // ═══ نموذج المنتج ═══

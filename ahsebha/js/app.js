@@ -2,6 +2,7 @@
 import * as store from './store.js';
 import { BRAND, logoImg } from './brand.js';
 import { icon, iconFor, watchIcons } from './icons.js';
+import { watchA11y } from './a11y.js';
 import { html, raw, setSettings, toast, confirmBox } from './ui.js';
 import { SEG, parseHash, guard, setTitle, go } from './nav.js';
 import * as auth from './auth.js';
@@ -348,6 +349,7 @@ function generateRecurring() {
 
 async function boot() {
   watchIcons();
+  watchA11y();
   themeButton();
   document.querySelector('.theme-toggle').onclick = toggleTheme;
   document.getElementById('lock-btn').onclick = () => auth.lock();

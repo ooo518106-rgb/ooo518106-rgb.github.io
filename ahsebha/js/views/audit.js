@@ -40,9 +40,9 @@ export function view({ root, query, path }) {
   const rows = db.audit.slice().reverse().filter((x) => (!f.act || x.act === f.act) && (!f.by || x.by === f.by));
   const users = [...new Set(db.audit.map((x) => x.by).filter(Boolean))];
   let limit = 200;
-  root.innerHTML = String(html`${head('سجل التعديلات', { sub: 'آخر 1500 عملية على المستندات: من أضاف أو عدّل أو حذف، ومتى' })}
-    <div class="toolbar"><select class="inp" data-act><option value="">كل العمليات</option>${Object.entries(ACT).map(([k, v]) => html`<option value="${k}" ${k === f.act ? 'selected' : ''}>${v[0]}</option>`)}</select>
-      ${users.length ? html`<select class="inp" data-by><option value="">كل المستخدمين</option>${users.map((u) => html`<option value="${u}" ${u === f.by ? 'selected' : ''}>${who(u)}</option>`)}</select>` : ''}
+  root.innerHTML = String(html`${head('سجل التعديلات', { sub: 'آخر 10 آلاف عملية على المستندات: من أضاف أو عدّل أو حذف، ومتى (ونسخة المستند قبل التعديل لآخر 1500 عملية)' })}
+    <div class="toolbar"><select class="inp" data-act aria-label="نوع العملية"><option value="">كل العمليات</option>${Object.entries(ACT).map(([k, v]) => html`<option value="${k}" ${k === f.act ? 'selected' : ''}>${v[0]}</option>`)}</select>
+      ${users.length ? html`<select class="inp" data-by aria-label="المستخدم"><option value="">كل المستخدمين</option>${users.map((u) => html`<option value="${u}" ${u === f.by ? 'selected' : ''}>${who(u)}</option>`)}</select>` : ''}
       <span class="grow"></span><button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
     <div data-out></div>`);
   const draw = () => {
@@ -60,9 +60,11 @@ export function view({ root, query, path }) {
   $('[data-act]', root).onchange = (e) => go2({ act: e.target.value });
   const by = $('[data-by]', root);
   if (by) by.onchange = (e) => go2({ by: e.target.value });
+  // التصدير والطباعة لكل الصفوف، لا للمعروض منها فقط
+  const withAll = (fn) => { const keep = limit; limit = Infinity; draw(); try { fn(); } finally { limit = keep; draw(); } };
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-more]')) { limit += 200; draw(); }
-    if (e.target.closest('[data-csv]')) { const t = $('[data-table]', root); if (t) exportTable(t, csvName('سجل التعديلات')); }
+    if (e.target.closest('[data-csv]')) withAll(() => { const t = $('[data-table]', root); if (t) exportTable(t, csvName('سجل التعديلات')); });
     const b = e.target.closest('[data-diff]');
     if (!b) return;
     const x = db.audit.find((y) => y.id === b.dataset.diff);

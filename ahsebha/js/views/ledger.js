@@ -151,11 +151,13 @@ export function accountShow({ root, params, query, path }) {
   draw();
   bindRows(root);
   bindPeriod(root, path, query);
+  // التصدير والطباعة لكل الصفوف، لا للمعروض منها فقط
+  const withAll = (fn) => { const keep = limit; limit = Infinity; draw(); try { fn(); } finally { limit = keep; draw(); } };
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-more]')) { limit += 500; draw(); }
     if (e.target.closest('[data-edit]')) accountDialog(a);
-    if (e.target.closest('[data-print]')) { const t = $('[data-table]', root); if (t) printReport(`دفتر الأستاذ: ${a.code} — ${a.name}`, periodLabel(per), t); }
-    if (e.target.closest('[data-csv]')) { const t = $('[data-table]', root); if (t) exportTable(t, csvName('دفتر أستاذ ' + a.name)); }
+    if (e.target.closest('[data-print]')) withAll(() => { const t = $('[data-table]', root); if (t) printReport(`دفتر الأستاذ: ${a.code} — ${a.name}`, periodLabel(per), t); });
+    if (e.target.closest('[data-csv]')) withAll(() => { const t = $('[data-table]', root); if (t) exportTable(t, csvName('دفتر أستاذ ' + a.name)); });
   });
 }
 
@@ -319,9 +321,11 @@ export function daybook({ root, query, path }) {
   draw();
   bindRows(root);
   bindPeriod(root, path, query);
+  // التصدير والطباعة لكل الصفوف، لا للمعروض منها فقط
+  const withAll = (fn) => { const keep = limit; limit = Infinity; draw(); try { fn(); } finally { limit = keep; draw(); } };
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-more]')) { limit += 150; draw(); }
-    if (e.target.closest('[data-print]')) { const t = $('[data-table]', root); if (t) printReport('دفتر اليومية', periodLabel(per), t); }
-    if (e.target.closest('[data-csv]')) { const t = $('[data-table]', root); if (t) exportTable(t, csvName('دفتر اليومية')); }
+    if (e.target.closest('[data-print]')) withAll(() => { const t = $('[data-table]', root); if (t) printReport('دفتر اليومية', periodLabel(per), t); });
+    if (e.target.closest('[data-csv]')) withAll(() => { const t = $('[data-table]', root); if (t) exportTable(t, csvName('دفتر اليومية')); });
   });
 }
