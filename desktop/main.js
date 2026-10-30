@@ -140,10 +140,11 @@ const PROBE = `(async () => {
   out.sw = await (async () => {
     try {
       if (!('serviceWorker' in navigator)) return -2;
-      // التسجيل يبدأ مع تحميل الصفحة. إن لم يظهر خلال 8 ثوانٍ فلا عامل خدمة (مثل أول تشغيل بلا إنترنت)
+      // التسجيل يبدأ مع تحميل الصفحة. إن لم يظهر عامل خدمة خلال 8 ثوانٍ فلا عامل خدمة (مثل أول تشغيل بلا إنترنت)
+      const worker = (g) => g && (g.active || g.waiting || g.installing);
       let reg = null;
-      for (let i = 0; i < 32 && !(reg = await navigator.serviceWorker.getRegistration()); i++) await wait(250);
-      if (!reg) return -3;
+      for (let i = 0; i < 32 && !worker(reg = await navigator.serviceWorker.getRegistration()); i++) await wait(250);
+      if (!worker(reg)) return -3;
       await Promise.race([navigator.serviceWorker.ready, wait(20000)]);
       for (let i = 0; i < 80; i++) { let n = 0; for (const k of await caches.keys()) n += (await (await caches.open(k)).keys()).length; if (n >= 20) return n; await wait(250); }
       return 0;

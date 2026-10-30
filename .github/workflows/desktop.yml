@@ -121,7 +121,7 @@ jobs:
           $RUN --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
           node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
           echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
-          $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
+          $RUN --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
           node ci/check.js "$RUNNER_TEMP/real2.json" "r.ok" "بدون إنترنت بعد تشغيل بإنترنت"
 
       - name: اختبار التشغيل (ويندوز)
@@ -193,7 +193,7 @@ jobs:
           Write-Host '--- تشغيل بإنترنت من الموقع الحقيقي: يحفظ النسخة الأحدث'
           Invoke-Smoke 'real1' @('--smoke-test', "--smoke-user-data=$real") 'r.ok && r.sw >= 20 && r.offlineSite.net >= 5' 'بإنترنت: من الشبكة ويحفظ نسخته'
           Write-Host '--- تشغيل بدون إنترنت بعد تشغيل بإنترنت'
-          Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$real") 'r.ok' 'بدون إنترنت بعد تشغيل بإنترنت'
+          Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$real") 'r.ok' 'بدون إنترنت بعد تشغيل بإنترنت'
           Write-Host 'العمل بدون إنترنت على النسخة المثبّتة: سليم'
           $un = Join-Path $dir 'Uninstall Ahsebha.exe'
           if (-not (Test-Path $un)) { throw 'لا يوجد برنامج إلغاء التثبيت' }
@@ -243,7 +243,7 @@ jobs:
           "$BIN" --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
           node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
           echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
-          "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
+          "$BIN" --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
           node ci/check.js "$RUNNER_TEMP/real2.json" "r.ok" "بدون إنترنت بعد تشغيل بإنترنت"
 
       - name: 'اختبار قرص ماك Intel — نفس الخطوات عبر Rosetta'
