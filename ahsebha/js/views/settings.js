@@ -55,6 +55,13 @@ export function view({ root }) {
           <div class="span-all">${field('ملاحظة أسفل الفاتورة', html`<textarea class="inp" name="invoiceNote" rows="2" placeholder="مثال: الاستبدال خلال 7 أيام، أو بيانات الحساب البنكي للتحويل">${s.invoiceNote || ''}</textarea>`)}</div>
         </div></div>
 
+      <div class="card"><div class="card-h"><h3>🛡️ ضبط الفواتير والمخزون</h3></div>
+        <div class="form-grid">
+          ${field('البيع بأكثر من المخزون', html`<select class="inp" name="negativeStock">${opt('warn', s.negativeStock || 'warn', 'تنبيه فقط (يُسمح بالبيع)')}${opt('block', s.negativeStock, 'منع البيع وإظهار المتوفر')}</select>`, { hint: 'يسري على الفواتير والكاشير ومرتجع المشتريات' })}
+          <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" name="allowDeleteInvoices" ${s.allowDeleteInvoices ? raw('checked') : ''}> السماح بحذف فواتير المبيعات ومرتجعاتها</label>
+          <p class="muted small span-all">الفاتورة الصادرة لا تُحذف عادةً: تُلغى من صفحتها بإشعار دائن فتبقى برقمها في السجل، وتنعكس المبيعات والضريبة والمخزون. فعّل الحذف فقط إن كنت تحتاجه، وأرقام المحذوف لا تُعاد على أي حال.</p>
+        </div></div>
+
       <div class="card"><div class="card-h"><h3>📅 السنة المالية والأرصدة الافتتاحية</h3></div>
         <div class="form-grid">
           ${field('تاريخ بداية التشغيل', inp('startDate', 'type="date"'), { hint: 'تاريخ القيد الافتتاحي' })}
@@ -165,6 +172,7 @@ export function view({ root }) {
       taxLabel: (v.taxLabel || '').trim() || 'الضريبة', inclusive: form.inclusive.checked,
       salePrefix: (v.salePrefix ?? 'INV-').trim(), printSize: v.printSize, showHijri: form.showHijri.checked, invoiceNote: (v.invoiceNote || '').trim(),
       startDate: isDate(v.startDate) ? v.startDate : s.startDate, fiscalStartMonth: Number(v.fiscalStartMonth) || 1,
+      negativeStock: v.negativeStock === 'block' ? 'block' : 'warn', allowDeleteInvoices: form.allowDeleteInvoices.checked,
     });
     guard.dirty = false;
     window.dispatchEvent(new Event('acc:shell'));

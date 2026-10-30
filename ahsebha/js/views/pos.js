@@ -1,6 +1,6 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
@@ -28,7 +28,6 @@ export function pos({ root }) {
   setTitle('الكاشير');
   const db = store.getDb();
   const s = S();
-  const B = store.getBooks();
   const products = db.products.filter((p) => p.active !== false);
   const cats = [...new Set(products.map((p) => p.category).filter(Boolean))];
   let cat = '';
@@ -68,10 +67,24 @@ export function pos({ root }) {
     }
     return null;
   };
+  // المستودع الذي يبيع منه الكاشير: المختار في إعداداته أو الافتراضي
+  const posWh = () => (store.getDb().warehouses.some((w) => w.id === s.posWh) ? s.posWh : defaultWh());
+  // المتوفر بعد ما في السلة؛ يُقرأ من الدفاتر الحالية لأن كل بيعة تغيّر المخزون
   const stockLeft = (p) => {
     if (p.type !== 'stock') return null;
     const inCart = cart.lines.filter((l) => l.product === p.id).reduce((t, l) => t + num(l.qty) * lineFactor(l), 0);
-    return round((B.stock.get(p.id)?.qty || 0) - inCart, 3);
+    const books = store.getBooks();
+    const wh = posWh();
+    const have = wh ? (books.whQty.get(p.id)?.get(wh) || 0) : (books.stock.get(p.id)?.qty || 0);
+    return round(have - inCart, 3);
+  };
+  // سياسة «منع البيع بأكثر من المخزون» (من الإعدادات): لا يُضاف للسلة أكثر من المتوفر
+  const blocks = (p, baseQty) => {
+    if (S().negativeStock !== 'block') return false;
+    const left = stockLeft(p);
+    if (left == null || baseQty <= left + 1e-9) return false;
+    toast(`لا يمكن: المتوفر من «${p.name}» ${Math.max(0, left)} فقط`, 'err');
+    return true;
   };
 
   function drawGrid() {
@@ -111,6 +124,7 @@ export function pos({ root }) {
     const f = unit ? num(unit.factor) : 1;
     const price = unit ? (unit.price !== '' && unit.price != null ? num(unit.price) : round(num(p.price) * f, dec())) : num(p.price);
     const uname = unit ? unit.name : '';
+    if (blocks(p, qty * f)) return;
     const i = cart.lines.findIndex((l) => l.product === p.id && (l.unit || '') === uname && num(l.price) === price && !num(l.disc));
     if (i >= 0) cart.lines[i].qty = round(num(cart.lines[i].qty) + qty, 3);
     else cart.lines.push({ product: p.id, desc: p.name, qty, price, disc: 0, tax: p.tax || 'S', ...(unit ? { unit: uname, factor: f } : {}) });
@@ -161,6 +175,10 @@ export function pos({ root }) {
         f.onsubmit = (e) => {
           e.preventDefault();
           const q = num(f.qty.value);
+          // مع «منع المخزون السالب»: الكمية الجديدة لا تتجاوز المتوفر بعد احتساب بقية السلة
+          const p = store.findProduct(l.product);
+          const extra = (q - num(l.qty)) * lineFactor(l);
+          if (p && extra > 0 && blocks(p, extra)) return;
           if (q > 0) l.qty = q; else cart.lines.splice(i, 1);
           l.price = Math.max(0, num(f.price.value));
           l.disc = Math.min(100, Math.max(0, num(f.disc.value)));
@@ -190,12 +208,17 @@ export function pos({ root }) {
       lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}) })),
       notes: '', payments: result.payments.filter((p) => p.amount > 0), pos: true,
     };
-    const wh = store.getDb().warehouses.some((w) => w.id === s.posWh) ? s.posWh : defaultWh();
+    const wh = posWh();
     if (wh) doc.wh = wh;
     if (s.posCc && store.getDb().centers.some((c) => c.id === s.posCc)) doc.cc = s.posCc;
     if (result.tendered) { doc.tendered = result.tendered; doc.change = round(result.tendered - (result.payments.find((p) => p.acc === accs.cash.id)?.amount || 0), dec()); }
     const errs = validateDoc(store.getDb(), doc);
     if (Object.keys(errs).length) { toast(Object.values(errs)[0], 'err'); return; }
+    // الحماية الأخيرة لسياسة المنع: قد يتغير المخزون من نافذة أخرى بعد تعبئة السلة
+    if (S().negativeStock === 'block') {
+      const short = stockShortages(store.getDb(), store.getBooks(), doc)[0];
+      if (short) { toast(`لا يمكن إتمام البيع: المتوفر من «${short.name}» ${short.have} فقط`, 'err'); return; }
+    }
     try { store.saveDoc(doc); } catch (e) { if (handleDemoError(e)) return; throw e; }
     toast(`تم البيع ✓ ${docNo(doc, s)}`);
     if (s.posAutoPrint !== false) printPaper(docPaper(doc, { size: s.posPrintSize || 'receipt' }), { size: s.posPrintSize || 'receipt', title: docNo(doc, s) });
@@ -339,7 +362,7 @@ export function pos({ root }) {
     const c = t.closest('[data-cat]');
     if (c) { cat = c.dataset.cat; $$('[data-cat]', root).forEach((b) => b.classList.toggle('on', b === c)); drawGrid(); return; }
     const inc = t.closest('[data-inc]'), dec_ = t.closest('[data-dec]'), del = t.closest('[data-del]'), ed = t.closest('[data-edit]');
-    if (inc) { const l = cart.lines[inc.dataset.inc]; l.qty = round(num(l.qty) + 1, 3); drawCart(); drawGrid(); return; }
+    if (inc) { const l = cart.lines[inc.dataset.inc]; const p = store.findProduct(l.product); if (p && blocks(p, lineFactor(l))) return; l.qty = round(num(l.qty) + 1, 3); drawCart(); drawGrid(); return; }
     if (dec_) { const i = Number(dec_.dataset.dec); const l = cart.lines[i]; l.qty = round(num(l.qty) - 1, 3); if (l.qty <= 0) cart.lines.splice(i, 1); drawCart(); drawGrid(); return; }
     if (del) { cart.lines.splice(Number(del.dataset.del), 1); drawCart(); drawGrid(); return; }
     if (ed) { editLine(Number(ed.dataset.edit)); return; }

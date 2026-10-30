@@ -245,7 +245,7 @@ export function qrSVG(text, size = 120) {
 // ─── مكوّنات صغيرة ───
 export const STATE_BADGE = {
   paid: ['مدفوعة', 'ok'], partial: ['مدفوعة جزئياً', 'warn'], unpaid: ['غير مدفوعة', 'muted'], overdue: ['متأخرة', 'bad'],
-  open: ['مفتوح', 'info'], converted: ['تحوّل لفاتورة', 'ok'], expired: ['منتهي', 'muted'],
+  open: ['مفتوح', 'info'], converted: ['تحوّل لفاتورة', 'ok'], expired: ['منتهي', 'muted'], cancelled: ['ملغاة', 'bad'],
 };
 export function badge(state) {
   const [t, k] = STATE_BADGE[state] || [state, 'muted'];

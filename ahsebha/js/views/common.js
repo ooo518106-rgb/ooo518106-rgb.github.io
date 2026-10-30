@@ -76,6 +76,8 @@ export const productName = (id) => store.findProduct(id)?.name || '';
 export function docStatus(d, B = store.getBooks()) {
   const st = B.status.get(d.id);
   if (!st) return null;
+  // الفاتورة الملغاة بإشعار دائن: لا مدفوع ولا متبقي، وحالتها «ملغاة»
+  if (B.cancelled && B.cancelled.has(d.id)) return { ...st, state: 'cancelled', paid: 0, due: 0 };
   const late = st.state !== 'paid' && d.dueDate && d.dueDate < today();
   return { ...st, state: late ? 'overdue' : st.state };
 }
