@@ -102,22 +102,33 @@ jobs:
 
       - name: 'اختبار العمل بدون إنترنت — الموقع الحقيقي (لينكس)'
         if: matrix.name == 'linux'
-        timeout-minutes: 6
+        timeout-minutes: 8
         run: |
-          # كل اتصال مرفوض (وكيل غير موجود): أولاً نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          # كل اتصال مرفوض (وكيل غير موجود). نتأكد أن النسخة الكاملة داخل التطبيق، وأنه يعمل بدون إنترنت من أول تشغيل ومن بعده
+          test -f ./dist/linux-unpacked/resources/ahsebha/index.html
+          test -f ./dist/linux-unpacked/resources/ahsebha/vendor/ocr/ara.traineddata.gz
           RUN="xvfb-run -a ./dist/linux-unpacked/ahsebha --no-sandbox"
           CUT=--proxy-server=127.0.0.1:9
-          PROFILE="$RUNNER_TEMP/profile-real"
-          echo "--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»"
-          $RUN --smoke-offline $CUT --smoke-user-data="$RUNNER_TEMP/profile-empty" --smoke-out="$RUNNER_TEMP/real-control.json"
-          cat "$RUNNER_TEMP/real-control.json"
-          echo "--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه"
-          $RUN --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real1.json"
-          cat "$RUNNER_TEMP/real1.json"
-          node -e "const r=require(process.argv[1]); if(!(r.ok&&r.sw>=20)){console.error('لم يحفظ البرنامج نسخته');process.exit(1)}" "$RUNNER_TEMP/real1.json"
-          echo "--- التشغيل الثاني: بدون أي اتصال"
-          $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real2.json"
-          cat "$RUNNER_TEMP/real2.json"
+          FIRST="$RUNNER_TEMP/profile-first"
+          REAL="$RUNNER_TEMP/profile-real"
+          echo "--- أول تشغيل بدون أي إنترنت: يجب أن يظهر البرنامج من النسخة المرفقة"
+          $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first.json"
+          node ci/check.js "$RUNNER_TEMP/first.json" "r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0" "أول تشغيل بدون إنترنت: من النسخة المرفقة"
+          echo "--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)"
+          $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first2.json"
+          node ci/check.js "$RUNNER_TEMP/first2.json" "r.ok" "ثاني تشغيل بدون إنترنت"
+          echo "--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة"
+          $RUN --smoke-test --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first3.json"
+          node ci/check.js "$RUNNER_TEMP/first3.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته"
+          echo "--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)"
+          $RUN --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first4.json"
+          node ci/check.js "$RUNNER_TEMP/first4.json" "r.ok" "بدون إنترنت بعد أن اتصل"
+          echo "--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث"
+          $RUN --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
+          node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
+          echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
+          $RUN --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
+          node ci/check.js "$RUNNER_TEMP/real2.json" "r.ok" "بدون إنترنت بعد تشغيل بإنترنت"
 
       - name: اختبار التشغيل (ويندوز)
         if: matrix.name == 'windows'
@@ -166,29 +177,33 @@ jobs:
           $r = Start-Process -FilePath $exe -ArgumentList '--smoke-test', "--smoke-out=$out" -Wait -PassThru
           if (Test-Path $out) { Get-Content $out }
           if ($r.ExitCode -ne 0) { throw "فشل تشغيل النسخة المثبّتة: رمز الخروج $($r.ExitCode)" }
-          # بدون إنترنت (الموقع الحقيقي والنسخة المثبّتة): نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          # بدون إنترنت (الموقع الحقيقي والنسخة المثبّتة): نتأكد أن النسخة الكاملة داخل التثبيت، وأن التطبيق يعمل بدون إنترنت من أول تشغيل ومن بعده
+          if (-not (Test-Path (Join-Path $dir 'resources\ahsebha\index.html'))) { throw 'النسخة الكاملة للبرنامج ليست داخل التثبيت' }
           $cut = '--proxy-server=127.0.0.1:9'
-          $prof = Join-Path $env:RUNNER_TEMP 'profile-real'
-          $empty = Join-Path $env:RUNNER_TEMP 'profile-empty'
-          function Invoke-Smoke([string]$name, [string[]]$more) {
+          $first = Join-Path $env:RUNNER_TEMP 'profile-first'
+          $real = Join-Path $env:RUNNER_TEMP 'profile-real'
+          function Invoke-Smoke([string]$name, [string[]]$more, [string]$expr, [string]$label) {
             $o = Join-Path $env:RUNNER_TEMP "$name.json"
             if (Test-Path $o) { Remove-Item $o }
             $argList = @("--smoke-out=$o") + $more
             $q = Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru
-            $text = if (Test-Path $o) { Get-Content $o -Raw } else { '' }
-            Write-Host "[$name] رمز الخروج $($q.ExitCode)"
-            Write-Host $text
+            if (Test-Path $o) { Write-Host (Get-Content $o -Raw) }
             if ($q.ExitCode -ne 0) { throw "فشل ($name): رمز الخروج $($q.ExitCode)" }
-            if ($text) { return ($text | ConvertFrom-Json) }
+            node ci/check.js $o $expr $label
+            if ($LASTEXITCODE -ne 0) { throw "فشل الشرط ($name): $label" }
           }
-          Write-Host '--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»'
-          $null = Invoke-Smoke 'control' @('--smoke-offline', $cut, "--smoke-user-data=$empty")
-          Write-Host '--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه'
-          $r1 = Invoke-Smoke 'real1' @('--smoke-test', "--smoke-user-data=$prof")
-          if (-not ($r1.ok -and $r1.sw -ge 20)) { throw 'لم يحفظ البرنامج نسخته للعمل بدون إنترنت' }
-          Write-Host '--- التشغيل الثاني: بدون أي اتصال'
-          $r2 = Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$prof")
-          if (-not $r2.ok) { throw 'لم يعمل البرنامج بدون إنترنت' }
+          Write-Host '--- أول تشغيل بدون أي إنترنت: يجب أن يظهر البرنامج من النسخة المرفقة'
+          Invoke-Smoke 'first' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$first") 'r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0' 'أول تشغيل بدون إنترنت: من النسخة المرفقة'
+          Write-Host '--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)'
+          Invoke-Smoke 'first2' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$first") 'r.ok' 'ثاني تشغيل بدون إنترنت'
+          Write-Host '--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة'
+          Invoke-Smoke 'first3' @('--smoke-test', "--smoke-user-data=$first") 'r.ok && r.sw >= 20 && r.offlineSite.net >= 5' 'بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته'
+          Write-Host '--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)'
+          Invoke-Smoke 'first4' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$first") 'r.ok' 'بدون إنترنت بعد أن اتصل'
+          Write-Host '--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث'
+          Invoke-Smoke 'real1' @('--smoke-test', "--smoke-user-data=$real") 'r.ok && r.sw >= 20 && r.offlineSite.net >= 5' 'بإنترنت: من الشبكة ويحفظ نسخته'
+          Write-Host '--- تشغيل بدون إنترنت بعد تشغيل بإنترنت'
+          Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$real") 'r.ok' 'بدون إنترنت بعد تشغيل بإنترنت'
           Write-Host 'العمل بدون إنترنت على النسخة المثبّتة: سليم'
           $un = Join-Path $dir 'Uninstall Ahsebha.exe'
           if (-not (Test-Path $un)) { throw 'لا يوجد برنامج إلغاء التثبيت' }
@@ -222,20 +237,30 @@ jobs:
           fi
           "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-dmg.json"
           cat "$RUNNER_TEMP/smoke-dmg.json"
-          # بدون إنترنت (الموقع الحقيقي والنسخة المنسوخة إلى Applications): نتأكد أن القطع حقيقي، ثم تشغيل بإنترنت يحفظ النسخة، ثم تشغيل بدون أي اتصال
+          # بدون إنترنت (الموقع الحقيقي والنسخة المنسوخة إلى Applications): نتأكد أن النسخة الكاملة داخل التطبيق، وأنه يعمل بدون إنترنت من أول تشغيل ومن بعده
+          test -f "$APP/Contents/Resources/ahsebha/index.html"
           BIN="$APP/Contents/MacOS/Ahsebha"
           CUT=--proxy-server=127.0.0.1:9
-          PROFILE="$RUNNER_TEMP/profile-real"
-          echo "--- فحص: بدون نسخة محفوظة وبلا اتصال يجب أن تظهر صفحة «لا يوجد اتصال»"
-          "$BIN" --smoke-offline $CUT --smoke-user-data="$RUNNER_TEMP/profile-empty" --smoke-out="$RUNNER_TEMP/real-control.json"
-          cat "$RUNNER_TEMP/real-control.json"
-          echo "--- التشغيل الأول: بإنترنت من الموقع الحقيقي، يحفظ البرنامج نفسه"
-          "$BIN" --smoke-test --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real1.json"
-          cat "$RUNNER_TEMP/real1.json"
-          node -e "const r=require(process.argv[1]); if(!(r.ok&&r.sw>=20)){console.error('لم يحفظ البرنامج نسخته');process.exit(1)}" "$RUNNER_TEMP/real1.json"
-          echo "--- التشغيل الثاني: بدون أي اتصال"
-          "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$PROFILE" --smoke-out="$RUNNER_TEMP/real2.json"
-          cat "$RUNNER_TEMP/real2.json"
+          FIRST="$RUNNER_TEMP/profile-first"
+          REAL="$RUNNER_TEMP/profile-real"
+          echo "--- أول تشغيل بدون أي إنترنت: يجب أن يظهر البرنامج من النسخة المرفقة"
+          "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first.json"
+          node ci/check.js "$RUNNER_TEMP/first.json" "r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0" "أول تشغيل بدون إنترنت: من النسخة المرفقة"
+          echo "--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)"
+          "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first2.json"
+          node ci/check.js "$RUNNER_TEMP/first2.json" "r.ok" "ثاني تشغيل بدون إنترنت"
+          echo "--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة"
+          "$BIN" --smoke-test --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first3.json"
+          node ci/check.js "$RUNNER_TEMP/first3.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته"
+          echo "--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)"
+          "$BIN" --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first4.json"
+          node ci/check.js "$RUNNER_TEMP/first4.json" "r.ok" "بدون إنترنت بعد أن اتصل"
+          echo "--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث"
+          "$BIN" --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
+          node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
+          echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
+          "$BIN" --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real2.json"
+          node ci/check.js "$RUNNER_TEMP/real2.json" "r.ok" "بدون إنترنت بعد تشغيل بإنترنت"
 
       - name: 'اختبار قرص ماك Intel — نفس الخطوات عبر Rosetta'
         if: matrix.name == 'mac'
@@ -256,9 +281,13 @@ jobs:
           if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
             softwareupdate --install-rosetta --agree-to-license || true
           fi
+          test -f "$APP/Contents/Resources/ahsebha/index.html"
           if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
             arch -x86_64 "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-out="$RUNNER_TEMP/smoke-x64.json"
             cat "$RUNNER_TEMP/smoke-x64.json"
+            echo "--- أول تشغيل بدون أي إنترنت (نسخة Intel): يجب أن يظهر البرنامج من النسخة المرفقة"
+            arch -x86_64 "$APP/Contents/MacOS/Ahsebha" --smoke-test --smoke-no-network --proxy-server=127.0.0.1:9 --smoke-user-data="$RUNNER_TEMP/profile-x64" --smoke-out="$RUNNER_TEMP/first-x64.json"
+            node ci/check.js "$RUNNER_TEMP/first-x64.json" "r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0" "نسخة Intel: أول تشغيل بدون إنترنت"
           else
             echo "::warning::لا يتوفر Rosetta على جهاز البناء فلم تُشغَّل نسخة Intel. تأكدنا فقط أن الملف بمعمارية Intel"
           fi
