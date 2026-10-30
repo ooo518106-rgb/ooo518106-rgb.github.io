@@ -117,7 +117,13 @@ jobs:
           echo "--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)"
           $RUN --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first2.json"
           node ci/check.js "$RUNNER_TEMP/first2.json" "r.ok" "ثاني تشغيل بدون إنترنت"
-          echo "--- تشغيل بإنترنت من الموقع الحقيقي: يحفظ النسخة الأحدث"
+          echo "--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة"
+          $RUN --smoke-test --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first3.json"
+          node ci/check.js "$RUNNER_TEMP/first3.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته"
+          echo "--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)"
+          $RUN --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first4.json"
+          node ci/check.js "$RUNNER_TEMP/first4.json" "r.ok" "بدون إنترنت بعد أن اتصل"
+          echo "--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث"
           $RUN --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
           node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
           echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
@@ -190,7 +196,11 @@ jobs:
           Invoke-Smoke 'first' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$first") 'r.ok && r.offlineSite.bundle >= 5 && r.offlineSite.net === 0' 'أول تشغيل بدون إنترنت: من النسخة المرفقة'
           Write-Host '--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)'
           Invoke-Smoke 'first2' @('--smoke-test', '--smoke-no-network', $cut, "--smoke-user-data=$first") 'r.ok' 'ثاني تشغيل بدون إنترنت'
-          Write-Host '--- تشغيل بإنترنت من الموقع الحقيقي: يحفظ النسخة الأحدث'
+          Write-Host '--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة'
+          Invoke-Smoke 'first3' @('--smoke-test', "--smoke-user-data=$first") 'r.ok && r.sw >= 20 && r.offlineSite.net >= 5' 'بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته'
+          Write-Host '--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)'
+          Invoke-Smoke 'first4' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$first") 'r.ok' 'بدون إنترنت بعد أن اتصل'
+          Write-Host '--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث'
           Invoke-Smoke 'real1' @('--smoke-test', "--smoke-user-data=$real") 'r.ok && r.sw >= 20 && r.offlineSite.net >= 5' 'بإنترنت: من الشبكة ويحفظ نسخته'
           Write-Host '--- تشغيل بدون إنترنت بعد تشغيل بإنترنت'
           Invoke-Smoke 'real2' @('--smoke-test', '--smoke-no-network', '--disable-http-cache', $cut, "--smoke-user-data=$real") 'r.ok' 'بدون إنترنت بعد تشغيل بإنترنت'
@@ -239,7 +249,13 @@ jobs:
           echo "--- تشغيل ثانٍ بدون إنترنت (نفس الجهاز)"
           "$BIN" --smoke-test --smoke-no-network $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first2.json"
           node ci/check.js "$RUNNER_TEMP/first2.json" "r.ok" "ثاني تشغيل بدون إنترنت"
-          echo "--- تشغيل بإنترنت من الموقع الحقيقي: يحفظ النسخة الأحدث"
+          echo "--- ثم يتصل الجهاز بالإنترنت (نفس الجهاز): يعمل ويحفظ نسخته ويسجّل عامل الخدمة"
+          "$BIN" --smoke-test --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first3.json"
+          node ci/check.js "$RUNNER_TEMP/first3.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بعد أول تشغيل بلا إنترنت: يتصل ويحفظ نسخته"
+          echo "--- ثم ينقطع الاتصال من جديد (بدون ذاكرة المتصفح المؤقتة)"
+          "$BIN" --smoke-test --smoke-no-network --disable-http-cache $CUT --smoke-user-data="$FIRST" --smoke-out="$RUNNER_TEMP/first4.json"
+          node ci/check.js "$RUNNER_TEMP/first4.json" "r.ok" "بدون إنترنت بعد أن اتصل"
+          echo "--- تشغيل بإنترنت من الموقع الحقيقي (جهاز جديد): يحفظ النسخة الأحدث"
           "$BIN" --smoke-test --smoke-user-data="$REAL" --smoke-out="$RUNNER_TEMP/real1.json"
           node ci/check.js "$RUNNER_TEMP/real1.json" "r.ok && r.sw >= 20 && r.offlineSite.net >= 5" "بإنترنت: من الشبكة ويحفظ نسخته"
           echo "--- تشغيل بدون إنترنت بعد تشغيل بإنترنت"
