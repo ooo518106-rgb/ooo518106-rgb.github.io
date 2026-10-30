@@ -36,13 +36,13 @@ export function pos({ root }) {
 
   root.innerHTML = String(html`<div class="pos-screen">
     <section class="pos-products">
-      <div class="pos-search"><input class="inp" data-scan placeholder="🔍 ابحث بالاسم أو امسح الباركود (مثال للكمية: 3*الباركود)" autocomplete="off" enterkeyhint="done">
+      <div class="pos-search"><input class="inp" data-scan placeholder="ابحث بالاسم أو امسح الباركود (مثال للكمية: 3*الباركود)" autocomplete="off" enterkeyhint="done">
         <button class="btn btn-ghost" data-cam title="مسح بالكاميرا">📷</button><button class="btn btn-ghost" data-settings title="إعدادات الكاشير">⚙️</button></div>
       ${cats.length ? html`<div class="pos-cats"><button class="chip on" data-cat="">الكل</button>${cats.map((c) => html`<button class="chip" data-cat="${c}">${c}</button>`)}</div>` : ''}
       <div class="pos-grid" data-grid></div>
     </section>
     <aside class="pos-cart" data-cart-panel>
-      <div class="pos-cust"><input class="inp" data-party placeholder="👤 عميل نقدي — اختر عميلاً للبيع الآجل" value="${partyName(cart.party)}"></div>
+      <div class="pos-cust"><input class="inp" data-party placeholder="عميل نقدي — اختر عميلاً للبيع الآجل" value="${partyName(cart.party)}"></div>
       <div class="pos-lines" data-lines></div>
       <div class="pos-totals" data-totals></div>
       <div class="pos-actions">

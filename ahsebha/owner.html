@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>لوحة المالك — احسبها</title>
+<title>لوحة المالك — كنز</title>
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="لوحة صاحب البرنامج: إصدار أكواد الاشتراك وإدارة الزبائن.">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -13,15 +13,16 @@
   // الوضع الداكن قبل رسم الصفحة حتى لا تومض
   try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')); } catch (e) { /* الوضع الفاتح */ }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
+<link rel="preload" href="fonts/plex-arabic-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-arabic-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body class="acc site-page">
 <!-- لا نستخدم إحصاءات هنا: بيانات زبائنك لا تغادر جهازك -->
 <header class="site-top">
-  <a class="site-brand" href="./"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">لوحة المالك</span></span></a>
+  <a class="site-brand" href="./"><span class="brand-badge"><img class="brand-logo" src="icons/icon.svg" alt="" width="40" height="40"></span><span>كنز<span class="brand-sub">لوحة المالك</span></span></a>
   <div class="site-top-actions">
     <a class="btn btn-ghost btn-sm" href="./">← البرنامج</a>
     <button type="button" class="btn btn-ghost btn-sm theme-toggle" id="theme">🌙 داكن</button>

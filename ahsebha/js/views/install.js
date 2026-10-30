@@ -2,6 +2,7 @@
 // تطبيق سطح المكتب (ويندوز وماك ولينكس) ينزّل من صفحة التحميل. وللتثبيت من المتصفح: Chrome وEdge بضغطة
 // (beforeinstallprompt)، وSafari بخطوات يدوية، وFirefox على الكمبيوتر لا يدعم.
 import { html, modal } from '../ui.js';
+import { BRAND } from '../brand.js';
 import { detectOS } from '../downloads.js';
 
 // هل البرنامج يعمل الآن كتطبيق مثبّت؟ (تطبيق سطح المكتب، أو نافذة مستقلة مثبّتة من المتصفح)
@@ -43,8 +44,8 @@ export function installHelp({ kind = browserKind(), os = detectOS(), canPrompt =
   const others = Object.entries(KINDS).filter(([k]) => k !== kind && k !== 'other');
   const desktop = DESKTOP_OS.includes(os);
   return modal({
-    title: '💻 ثبّت احسبها على اللابتوب',
-    body: html`<p class="dlg-msg">ثبّت احسبها كتطبيق: أيقونة ونافذة لوحده مثل أي برنامج، ويفتح أسرع ويشتغل بدون إنترنت. بياناتك تبقى على جهازك.</p>
+    title: `💻 ثبّت ${BRAND.name} على اللابتوب`,
+    body: html`<p class="dlg-msg">ثبّت ${BRAND.name} كتطبيق: أيقونة ونافذة لوحده مثل أي برنامج، ويفتح أسرع ويشتغل بدون إنترنت. بياناتك تبقى على جهازك.</p>
       ${desktop ? html`<div class="install-me install-app" data-install-app-card><h3>💻 تطبيق اللابتوب (الأفضل)</h3>
         <p class="small">ملف تثبيت لويندوز أو ماك أو لينكس، تنزّله مرة واحدة فيصير له أيقونة على سطح المكتب ونافذة لوحده بدون متصفح.</p>
         <p style="margin-top:10px"><a class="btn btn-primary" href="download.html" target="_blank" rel="noopener" data-download-link>⬇️ حمّل التطبيق</a></p></div>` : ''}

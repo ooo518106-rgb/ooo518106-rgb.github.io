@@ -1,5 +1,6 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
+import { BRAND } from '../brand.js';
 import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
@@ -595,7 +596,7 @@ export function show(type, { root, params, query }) {
     const lines = [`${T.name} رقم ${no}`, `التاريخ: ${fmtDate(d.date)}`, party ? `${kindName(C.kind)}: ${party.name}` : '', `الإجمالي: ${moneyText(t.total)}`];
     if (st && st.due > 0) lines.push(`المتبقي: ${moneyText(st.due)}`);
     lines.push('', `مع تحيات ${s.name || ''}`);
-    if (demoState()) lines.push('(نسخة تجريبية من برنامج احسبها)'); // كما على الورقة المطبوعة
+    if (demoState()) lines.push(`(نسخة تجريبية من برنامج ${BRAND.name})`); // كما على الورقة المطبوعة
     window.open(waLink(party && party.phone, lines.filter((x) => x !== '').join('\n')), '_blank', 'noopener');
   };
   const del = $('[data-del]', root);

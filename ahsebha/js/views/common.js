@@ -1,5 +1,6 @@
 // ═══ عناصر مشتركة بين الشاشات: الفترات، الإضافة السريعة، أوراق الطباعة، القيود ═══
 import * as store from '../store.js';
+import { BRAND } from '../brand.js';
 import {
   docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, ymd, monthStart, monthEnd, addMonths, addDays,
   quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc,
@@ -319,7 +320,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
       </div>
       <div class="pp-words">${tafqeet(T.total, s.currency)}</div></div>
     </div>
-    <div class="pp-foot"><span>${s.name || ''}</span><span>${dm ? 'نسخة تجريبية من برنامج احسبها — للتجربة فقط' : small ? (bi ? 'شكراً لزيارتكم · Thank you' : 'شكراً لزيارتكم') : 'صادر من برنامج محاسبة احسبها'}</span></div>
+    <div class="pp-foot"><span>${s.name || ''}</span><span>${dm ? `نسخة تجريبية من برنامج ${BRAND.name} — للتجربة فقط` : small ? (bi ? 'شكراً لزيارتكم · Thank you' : 'شكراً لزيارتكم') : `صادر من برنامج محاسبة ${BRAND.name}`}</span></div>
   </div>`;
 }
 
@@ -387,7 +388,7 @@ export function voucherPaper(d) {
     <div class="pp-words">${tafqeet(amount, s.currency)}</div>
     <table class="pp-lines" style="margin-top:14px"><tbody>${rows.map(([k, v]) => html`<tr><td style="width:34%;color:#6b7280">${k}</td><td><b>${v}</b></td></tr>`)}</tbody></table>
     <div class="pp-sign"><div>${d.type === 'receipt' ? 'المستلم' : 'المستلم / الجهة'}</div><div>المحاسب</div><div>المدير</div></div>
-    <div class="pp-foot"><span>${s.name || ''}</span><span>صادر من برنامج محاسبة احسبها</span></div>
+    <div class="pp-foot"><span>${s.name || ''}</span><span>صادر من برنامج محاسبة ${BRAND.name}</span></div>
   </div>`;
 }
 
@@ -401,7 +402,7 @@ export function printReport(title, sub, table) {
   printHTML(html`<div class="paper pp-report">
     <div class="pp-head">${coBlock(s)}<div class="pp-title"><h1>${title}</h1><div class="muted">${sub || ''}</div></div></div>
     <div style="margin-top:12px">${raw(table.outerHTML)}</div>
-    <div class="pp-foot"><span>طُبع بتاريخ ${fmtDate(today())}</span><span>برنامج محاسبة احسبها</span></div></div>`, { title });
+    <div class="pp-foot"><span>طُبع بتاريخ ${fmtDate(today())}</span><span>برنامج محاسبة ${BRAND.name}</span></div></div>`, { title });
 }
 
 // ─── القيد المحاسبي للمستند ───
@@ -423,7 +424,7 @@ export function waLink(phone, text) {
   return `https://wa.me/${p}?text=${encodeURIComponent(text)}`;
 }
 
-export const csvName = (title) => `${title} - ${S().name || 'احسبها'} - ${today()}`;
+export const csvName = (title) => `${title} - ${S().name || BRAND.name} - ${today()}`;
 
 // ─── مسح الباركود بالكاميرا: onCode يرجّع true لإغلاق النافذة بعد أول رمز ───
 export function cameraDialog(onCode, { title = 'مسح الباركود بالكاميرا' } = {}) {

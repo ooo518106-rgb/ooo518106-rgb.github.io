@@ -1,6 +1,8 @@
-// ═══ برنامج محاسبة احسبها: الهيكل والتنقل ═══
+// ═══ برنامج محاسبة كنز: الهيكل والتنقل ═══
 import * as store from './store.js';
-import { html, setSettings, toast, confirmBox } from './ui.js';
+import { BRAND, logoImg } from './brand.js';
+import { icon, iconFor, watchIcons } from './icons.js';
+import { html, raw, setSettings, toast, confirmBox } from './ui.js';
 import { SEG, parseHash, guard, setTitle, go } from './nav.js';
 import * as auth from './auth.js';
 import * as home from './views/home.js';
@@ -24,6 +26,7 @@ import * as stockViews from './views/stock.js';
 import * as reconcile from './views/reconcile.js';
 import * as todayView from './views/today.js';
 import * as subscription from './views/subscription.js';
+import { openPalette } from './views/palette.js';
 import * as license from './license.js';
 import { CONFIG } from './plans.js';
 import { isInstalled, installHelp } from './views/install.js';
@@ -167,7 +170,7 @@ export function renderShell() {
   const db = store.getDb();
   setSettings(db && db.settings);
   const side = document.getElementById('side');
-  const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">برنامج المحاسبة</span></span></a>`;
+  const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">${raw(logoImg(40))}</span><span>${BRAND.name}<span class="brand-sub">${BRAND.tagline}</span></span></a>`;
   const foot = html`<div class="side-foot">${isInstalled() || justInstalled ? '' : html`<button type="button" class="btn btn-ghost btn-sm side-install" data-install>💻 ثبّت البرنامج على اللابتوب</button>`}<p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري. <a href="privacy.html">سياسة الخصوصية</a>${CONFIG.published ? html` · <a href="plans.html" target="_blank" rel="noopener">الباقات</a>` : ''}</p></div>`;
   side.innerHTML = String(db
     ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
@@ -179,6 +182,8 @@ export function renderShell() {
     a.hidden = !auth.can(auth.routePerm(a.getAttribute('href'))) || !!(f && !license.has(f));
   });
   quick.hidden = !db || !quick.querySelector('.quick-menu a:not([hidden])');
+  document.getElementById('search-btn').hidden = !db;
+  renderTabbar();
   renderDemoBar();
   const u = auth.currentUser();
   const lockBtn = document.getElementById('lock-btn');
@@ -197,8 +202,68 @@ function renderDemoBar() {
 function markNav() {
   const first = parseHash().path.split('/')[0];
   const seg = first === 'daybook' ? 'journal' : first;
-  document.querySelectorAll('.nav-a[data-h]').forEach((a) => a.classList.toggle('on', a.dataset.h === seg));
+  document.querySelectorAll('.nav-a[data-h], .tab[data-h]').forEach((a) => {
+    const on = a.dataset.h === seg;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
 }
+
+// ─── الشريط السفلي للجوال: الأهم بضغطة، وزر «+» لإنشاء أي مستند ───
+const TABS = [
+  { ic: 'house', t: 'الرئيسية', h: '' },
+  { ic: 'receipt-text', t: 'المبيعات', h: 'sales' },
+  { add: true },
+  { ic: 'users', t: 'العملاء', h: 'customers' },
+  { more: true, ic: 'menu', t: 'المزيد' },
+];
+// روابط «جديد» المسموحة للمستخدم الحالي (تُحسب صلاحياتها وقفل الاشتراك في renderShell)
+const quickLinks = () => [...document.querySelectorAll('#quick .quick-menu a:not([hidden])')];
+const linkIcon = (a) => { const s = a.querySelector('svg'); return (s && s.dataset.icon) || 'plus'; };
+
+function renderTabbar() {
+  const bar = document.getElementById('tabbar');
+  const db = store.getDb();
+  const hasNew = quickLinks().length > 0;
+  const tabs = TABS.filter((x) => x.more || (x.add ? hasNew : auth.can(auth.routePerm(x.h)) && !license.lockedFeature(x.h)));
+  bar.hidden = !db;
+  bar.innerHTML = String(html`${tabs.map((x) => (x.add
+    ? html`<button type="button" class="tab tab-add" data-tab="add" aria-label="جديد"><span class="tab-plus">${raw(icon('plus'))}</span></button>`
+    : x.more
+      ? html`<button type="button" class="tab" data-tab="more" aria-label="المزيد" aria-controls="side"><span class="tab-ic">${raw(icon(x.ic))}</span><span class="tab-t">${x.t}</span></button>`
+      : html`<a class="tab" data-h="${x.h}" href="#/${x.h}"><span class="tab-ic">${raw(icon(x.ic))}</span><span class="tab-t">${x.t}</span></a>`))}`);
+  markNav();
+}
+
+// ورقة «إنشاء جديد» تصعد من أسفل الشاشة بنفس روابط قائمة «جديد»
+function quickSheet() {
+  const links = quickLinks();
+  if (!links.length) return;
+  const dlg = document.createElement('dialog');
+  dlg.className = 'sheet';
+  dlg.setAttribute('aria-label', 'إنشاء جديد');
+  dlg.innerHTML = String(html`<div class="sheet-box"><div class="sheet-grip"></div><h3>إنشاء جديد</h3><div class="sheet-grid">${links.map((a) => html`<a class="sheet-a" href="${a.getAttribute('href')}"><span class="sheet-ic">${raw(icon(linkIcon(a)))}</span><span>${a.textContent.trim()}</span></a>`)}</div></div>`);
+  dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('a')) dlg.close(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// الشريط السفلي لا يظهر مع النماذج وشاشة الكاشير حتى لا يزاحم أزرار الحفظ والدفع
+const hidesTabbar = (path) => /(^|\/)(new|edit)$/.test(path) || path === 'pos' || path === 'welcome' || path === 'activate';
+
+// ─── البحث السريع (Ctrl+K): صفحات وتقارير وإجراءات وعملاء ومنتجات ومستندات ───
+function openSearch() {
+  const db = store.getDb();
+  if (!db || auth.isLocked()) return;
+  const pages = navItems().filter((n) => !n.sec).map((n) => ({ ic: iconFor(n.ic) || 'file-text', t: n.t, h: n.h, locked: !!license.lockedFeature(n.h) }));
+  if (auth.can(auth.routePerm('reports')) && !license.lockedFeature('reports')) {
+    for (const r of reports.REPORTS) if (!r.sec) pages.push({ ic: iconFor(r.icon) || 'chart-column', t: r.t, h: r.href ? r.href.replace(/^#\//, '') : 'reports/' + r.id });
+  }
+  const actions = quickLinks().map((a) => ({ ic: linkIcon(a), t: a.textContent.trim(), href: a.getAttribute('href'), kw: 'جديد إضافة إنشاء' }));
+  openPalette({ db, pages, actions, can: auth.can, routePerm: auth.routePerm });
+}
+const typing = (el) => !!el && (/^(input|textarea|select)$/i.test(el.tagName) || el.isContentEditable);
 
 const closeNav = () => document.getElementById('app').classList.remove('nav-open');
 
@@ -211,6 +276,7 @@ async function render() {
   // البرنامج مقفل: لا تُعرض أي صفحة حتى يُدخل الرمز، وتبقى الصفحة الحالية كما هي تحت القفل
   if (auth.isLocked()) { stale = true; return; }
   const { path, query } = parseHash();
+  document.body.classList.toggle('no-tabbar', hidesTabbar(path));
   if (guard.dirty && location.hash !== lastHash) {
     const leave = await confirmBox('في تعديلات غير محفوظة على هذه الصفحة. تريد تركها؟', { ok: 'اترك التعديلات', danger: true, title: 'تعديلات غير محفوظة' });
     if (!leave) { skipNext = true; location.hash = lastHash; return; }
@@ -279,9 +345,17 @@ function generateRecurring() {
 }
 
 async function boot() {
+  watchIcons();
   themeButton();
   document.querySelector('.theme-toggle').onclick = toggleTheme;
   document.getElementById('lock-btn').onclick = () => auth.lock();
+  document.getElementById('search-btn').onclick = openSearch;
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelector('.sp-k').textContent = '⌘ K';
+  document.getElementById('tabbar').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    if (b.dataset.tab === 'add') quickSheet(); else document.getElementById('app').classList.toggle('nav-open');
+  });
   await store.load();
   await license.init().catch(() => {});
   auth.init({
@@ -310,7 +384,12 @@ async function boot() {
     const q = document.getElementById('quick');
     if (q.open && !q.contains(e.target)) q.open = false;
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeNav();
+    // Ctrl/⌘+K من أي مكان، و«/» خارج حقول الكتابة (ما عدا الكاشير: الباركود يكتب أحرفاً). e.code لأن لوحة المفاتيح العربية تغيّر e.key
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) { e.preventDefault(); openSearch(); }
+    else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.code === 'Slash' || e.key === '/') && !typing(e.target) && parseHash().path !== 'pos') { e.preventDefault(); openSearch(); }
+  });
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
 }

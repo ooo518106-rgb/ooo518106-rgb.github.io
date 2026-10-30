@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>تحميل تطبيق احسبها للابتوب — ويندوز وماك ولينكس</title>
-<meta name="description" content="نزّل برنامج محاسبة احسبها كتطبيق مثبّت على اللابتوب (ويندوز أو ماك أو لينكس): أيقونة ونافذة خاصة بدون متصفح، ويعمل بدون إنترنت بعد أول تشغيل، وبياناتك على جهازك.">
+<title>تحميل تطبيق كنز للابتوب — ويندوز وماك ولينكس</title>
+<meta name="description" content="نزّل برنامج محاسبة كنز كتطبيق مثبّت على اللابتوب (ويندوز أو ماك أو لينكس): أيقونة ونافذة خاصة بدون متصفح، ويعمل بدون إنترنت بعد أول تشغيل، وبياناتك على جهازك.">
 <!-- معاينة غير معلنة: عند النشر غيّر robots إلى index, follow وأضف الصفحة لـ sitemap.xml -->
 <meta name="robots" content="noindex, nofollow">
 <link rel="canonical" href="https://ooo518106-rgb.github.io/ahsebha/download.html">
 <meta property="og:type" content="website">
 <meta property="og:locale" content="ar_AR">
-<meta property="og:title" content="تحميل تطبيق احسبها للابتوب">
+<meta property="og:title" content="تحميل تطبيق كنز للابتوب">
 <meta property="og:description" content="برنامج محاسبة عربي كتطبيق مثبّت على اللابتوب: ويندوز وماك ولينكس.">
 <meta property="og:url" content="https://ooo518106-rgb.github.io/ahsebha/download.html">
 <meta property="og:image" content="https://ooo518106-rgb.github.io/ahsebha/store/feature-graphic.png">
@@ -22,14 +22,15 @@
   // الوضع الداكن قبل رسم الصفحة حتى لا تومض
   try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')); } catch (e) { /* الوضع الفاتح */ }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
+<link rel="preload" href="fonts/plex-arabic-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-arabic-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body class="acc site-page sales-page">
 <header class="site-top">
-  <a class="site-brand" href="./"><span class="brand-badge">📒</span><span>احسبها<span class="brand-sub">برنامج المحاسبة</span></span></a>
+  <a class="site-brand" href="./"><span class="brand-badge"><img class="brand-logo" src="icons/icon.svg" alt="" width="40" height="40"></span><span>كنز<span class="brand-sub">برنامج المحاسبة</span></span></a>
   <div class="site-top-actions">
     <a class="btn btn-primary btn-sm" href="./">افتح البرنامج</a>
     <button type="button" class="btn btn-ghost btn-sm theme-toggle" id="theme">🌙 داكن</button>
@@ -37,12 +38,12 @@
 </header>
 <main class="site-wrap sales-wrap" id="download">
   <noscript>
-    <section class="hero-acc"><h1>تحميل تطبيق احسبها للابتوب</h1>
+    <section class="hero-acc"><h1>تحميل تطبيق كنز للابتوب</h1>
       <p>الملفات متوفرة في صفحة الإصدارات: <a href="https://github.com/ooo518106-rgb/ooo518106-rgb.github.io/releases/latest">تحميل من صفحة الإصدارات</a></p></section>
   </noscript>
 </main>
 <footer class="site-foot">
-  <p>© احسبها — برنامج محاسبة عربي. بياناتك المحاسبية تبقى على جهازك. <a href="privacy.html">سياسة الخصوصية</a> · <a href="./">افتح البرنامج</a></p>
+  <p>© كنز — برنامج محاسبة عربي. بياناتك المحاسبية تبقى على جهازك. <a href="privacy.html">سياسة الخصوصية</a> · <a href="./">افتح البرنامج</a></p>
 </footer>
 <script type="module" src="js/download-page.js"></script>
 </body>

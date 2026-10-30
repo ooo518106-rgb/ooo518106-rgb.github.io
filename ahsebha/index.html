@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>احسبها — برنامج محاسبة مجاني متكامل للمحلات والمتاجر</title>
+<title>كنز — برنامج محاسبة مجاني متكامل للمحلات والمتاجر</title>
 <meta name="description" content="برنامج محاسبة عربي مجاني: كاشير بالباركود، فواتير ضريبية مع رمز QR بالعربي والإنجليزي، مشتريات ومصروفات، مخزون بالتكلفة المتوسطة، سندات قبض وصرف، قيود تلقائية، ميزانية وقائمة دخل وإقرار ضريبي، واستيراد من Excel. يعمل من المتصفح وبدون تسجيل، وبياناتك تبقى على جهازك.">
 <meta name="keywords" content="برنامج محاسبة مجاني، برنامج كاشير، نقطة بيع، باركود، فاتورة ضريبية، فاتورة إلكترونية، رمز QR، هيئة الزكاة، مخزون، قيود يومية، ميزانية، قائمة دخل، إقرار ضريبي">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-96.png" sizes="96x96" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="احسبها">
+<meta name="apple-mobile-web-app-title" content="كنز">
 <meta name="theme-color" content="#4f46e5">
 <meta name="google-site-verification" content="4qdTBLSKvfO3MlHI-cHfOOyLIlG5C3HS7xAbxH4m8GY" />
 <link rel="manifest" href="manifest.json">
@@ -28,7 +28,7 @@
 {
   "@context": "https://schema.org",
   "@type": "WebApplication",
-  "name": "برنامج محاسبة احسبها",
+  "name": "برنامج محاسبة كنز",
   "description": "برنامج محاسبة عربي مجاني للمحلات والمتاجر: فواتير ضريبية، مخزون، سندات، قيود، تقارير مالية وإقرار ضريبي.",
   "applicationCategory": "FinanceApplication",
   "operatingSystem": "Web",
@@ -36,9 +36,10 @@
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "SAR" }
 }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
+<link rel="preload" href="fonts/plex-arabic-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-arabic-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plex-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="app.css">
 <style id="print-page"></style>
 </head>
@@ -51,6 +52,7 @@
     <header class="topbar">
       <button class="icon-btn menu-btn" id="menu-btn" aria-label="القائمة" aria-controls="side">☰</button>
       <div class="topbar-title" id="topbar-title">برنامج المحاسبة</div>
+      <button class="search-pill" id="search-btn" type="button" aria-label="بحث سريع" title="بحث سريع" hidden><span class="sp-ic">🔍</span><span class="sp-t">ابحث عن أي شيء…</span><kbd class="sp-k">Ctrl K</kbd></button>
       <details class="quick" id="quick" hidden>
         <summary class="btn btn-primary btn-sm">➕ جديد</summary>
         <nav class="quick-menu">
@@ -74,7 +76,7 @@
     <main class="view" id="view">
       <section class="welcome">
         <div class="hero-acc">
-          <div class="ic">📒</div>
+          <div class="ic"><img class="hero-logo" src="icons/icon.svg" alt="" width="84" height="84"></div>
           <h1>برنامج محاسبة مجاني متكامل</h1>
           <p>فواتير ضريبية مع رمز QR، مشتريات ومصروفات، مخزون، سندات قبض وصرف، قيود يومية تلقائية، ميزانية وقائمة دخل وإقرار ضريبي — من المتصفح وبدون تسجيل.</p>
         </div>
@@ -84,6 +86,7 @@
   </div>
 </div>
 
+<nav class="tabbar" id="tabbar" aria-label="التنقل السريع" hidden></nav>
 <div id="print-area"></div>
 <div id="toasts" aria-live="polite"></div>
 
