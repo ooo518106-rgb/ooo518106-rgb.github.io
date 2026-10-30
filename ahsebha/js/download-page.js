@@ -1,9 +1,12 @@
 // ═══ صفحة تحميل تطبيق اللابتوب: تقترح الملف المناسب لجهازك وتشرح التحذير الذي يظهر أول مرة ═══
 import { DOWNLOADS, detectOS, downloadUrl, releasesUrl, forOS } from './downloads.js';
+import { BRAND } from './brand.js';
 import { CONFIG } from './plans.js';
 import { trialOn, contactLink, invoicesText, previewing } from './license.js';
 import { html } from './ui.js';
 
+import { watchIcons } from './icons.js';
+watchIcons();
 const root = document.getElementById('download');
 const os = detectOS();
 const mobile = os === 'ios' || os === 'android';
@@ -13,7 +16,7 @@ const btn = (d, primary, label = `${d.icon} ${d.name}`) => html`<a class="btn ${
 function hero() {
   const mine = forOS(os);
   return html`<section class="hero-acc sales-hero"><div class="ic">💻</div>
-    <h1>احسبها على اللابتوب</h1>
+    <h1>${BRAND.name} على اللابتوب</h1>
     <p>تطبيق مثبّت بأيقونته ونافذته الخاصة، بدون متصفح. يشتغل بدون إنترنت حتى من أول تشغيل، وبياناتك على جهازك.</p>
     ${mobile
     ? html`<p class="note note-info" style="margin-top:16px" data-mobile>📱 هذه الصفحة للابتوب. افتحها من جهاز ويندوز أو ماك أو لينكس. أما على الجوال فافتح البرنامج من المتصفح وثبّته من قائمته.</p>
@@ -28,7 +31,7 @@ function hero() {
 // نسخة العرض: تظهر للزوار حين يفعّلها المالك، ولجهاز المالك وحده في المعاينة
 function demo() {
   if (!trialOn()) return '';
-  const wa = contactLink('السلام عليكم، جرّبت نسخة العرض من برنامج احسبها وأريد كود الاشتراك.');
+  const wa = contactLink(`السلام عليكم، جرّبت نسخة العرض من برنامج ${BRAND.name} وأريد كود الاشتراك.`);
   const days = CONFIG.demoDays > 0 ? `خلال ${CONFIG.demoDays} يوماً` : 'بلا حد زمني';
   return html`<section class="sales-sec demo-sec" id="demo" data-demo-section>
     ${CONFIG.demoPublic && wa ? '' : html`<p class="note note-warn" data-demo-preview>🚧 <b>معاينة:</b> ${CONFIG.demoPublic ? '' : 'نسخة العرض غير معلنة بعد للزوار، وتظهر لك لأنك شغّلتها على هذا الجهاز من لوحة المالك. '}${wa ? '' : 'وينقصها رقم واتساب البيع (whatsapp في plans.js) ليظهر زر «أريد كود الاشتراك».'}</p>`}
@@ -53,7 +56,7 @@ const steps = () => html`<section class="sales-sec"><div class="sec-head"><h2>أ
     <details ${os === 'windows' ? 'open' : ''} data-help="windows"><summary>🪟 ويندوز</summary><ol class="install-steps">
       <li>شغّل الملف <b dir="ltr">Ahsebha-Setup.exe</b> من مجلد التنزيلات. إن حظره المتصفح فاضغط ⋯ بجانب التنزيل ثم «الاحتفاظ».</li>
       <li>إن ظهرت شاشة «Windows protected your PC»: اضغط «مزيد من المعلومات» ثم «تشغيل على أي حال».</li>
-      <li>يتثبت تلقائياً، وتظهر أيقونة «احسبها» على سطح المكتب وفي قائمة ابدأ، ويفتح البرنامج.</li></ol></details>
+      <li>يتثبت تلقائياً، وتظهر أيقونة «${BRAND.name}» على سطح المكتب وفي قائمة ابدأ، ويفتح البرنامج.</li></ol></details>
     <details ${os === 'mac' ? 'open' : ''} data-help="mac"><summary>🍎 ماك</summary><ol class="install-steps">
       <li>لمعرفة معالج جهازك: شعار Apple ← «حول هذا الـ Mac». إن كُتب «Apple M…» فنزّل ملف Apple، وإن كُتب «Intel» فنزّل ملف Intel.</li>
       <li>افتح ملف <b dir="ltr">.dmg</b> واسحب «Ahsebha» إلى مجلد Applications.</li>

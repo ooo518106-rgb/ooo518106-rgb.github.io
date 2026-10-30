@@ -1,6 +1,7 @@
 // ═══ لوحة المالك: مفتاحك، زبائنك، وإصدار أكواد الاشتراك ═══
 // كل شيء يعمل على جهازك: المفتاح الخاص مشفّر بكلمة سر، وقائمة الزبائن محفوظة هنا ويمكنك تنزيل نسخة منها.
 import { CONFIG, FEATURES, PLANS, planFeatures } from './plans.js';
+import { BRAND } from './brand.js';
 import { PUBLIC_KEYS } from './license-key.js';
 import * as lic from './license.js';
 import { generateOwnerKeys, importPrivate, wrapKeys, unwrapKeys, buildPayload, signLicense, publicKeyLine, newLicenseId } from './license-sign.js';
@@ -8,6 +9,8 @@ import { html, raw, $, $$, modal, confirmBox, toast, field, fmtDate, norm, downl
 import { addDays, addMonths, ymd, daysBetween, isDate } from './core.js';
 import { CHANGELOG, VERSION, NUMBERED_LATER_BEFORE, cmpVersion } from './changelog.js';
 
+import { watchIcons } from './icons.js';
+watchIcons();
 const LS_KEY = 'ahsebha-owner-key';
 const LS_DATA = 'ahsebha-owner-data';
 const LS_SEEN = 'ahsebha-owner-seen-version';
@@ -67,14 +70,14 @@ function standing(c) {
 
 function issueMessage(c, rec) {
   const p = rec.payload;
-  if (p.n) return `السلام عليكم ${c.name} 👋\nهذه نسخة عرض من برنامج احسبها لتجربته: ${lic.invoicesText(p.n)} خلال ${daysText(daysBetween(p.i, p.e))} وكل الميزات مفتوحة للتجربة.\nلتفعيلها اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nوإذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك الكامل، وبتكمل على نفس بياناتك 🙏`;
-  return `السلام عليكم ${c.name} 👋\nتم تفعيل اشتراكك في برنامج احسبها — باقة ${planName(p.p)}${p.e ? ` حتى ${fmtDate(p.e)}` : ' (اشتراك دائم)'}.\nلتفعيله اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nشكراً لثقتك 🙏`;
+  if (p.n) return `السلام عليكم ${c.name} 👋\nهذه نسخة عرض من برنامج ${BRAND.name} لتجربته: ${lic.invoicesText(p.n)} خلال ${daysText(daysBetween(p.i, p.e))} وكل الميزات مفتوحة للتجربة.\nلتفعيلها اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nوإذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك الكامل، وبتكمل على نفس بياناتك 🙏`;
+  return `السلام عليكم ${c.name} 👋\nتم تفعيل اشتراكك في برنامج ${BRAND.name} — باقة ${planName(p.p)}${p.e ? ` حتى ${fmtDate(p.e)}` : ' (اشتراك دائم)'}.\nلتفعيله اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nشكراً لثقتك 🙏`;
 }
 function reminderMessage(c, st) {
-  if (st.key === 'demo-over') return `السلام عليكم ${c.name} 👋\nانتهت نسخة العرض من برنامج احسبها. إذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
-  if (st.key === 'demo') return `السلام عليكم ${c.name} 👋\nكيف شفت نسخة العرض من برنامج احسبها؟ إذا عجبك أو عندك أي سؤال ردّ علينا، وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
+  if (st.key === 'demo-over') return `السلام عليكم ${c.name} 👋\nانتهت نسخة العرض من برنامج ${BRAND.name}. إذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
+  if (st.key === 'demo') return `السلام عليكم ${c.name} 👋\nكيف شفت نسخة العرض من برنامج ${BRAND.name}؟ إذا عجبك أو عندك أي سؤال ردّ علينا، وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
   const when = st.key === 'expired' || st.key === 'grace' ? `انتهى بتاريخ ${fmtDate(st.e.exp)}` : `ينتهي بتاريخ ${fmtDate(st.e.exp)}`;
-  return `السلام عليكم ${c.name} 👋\nنذكّرك أن اشتراكك في برنامج احسبها ${when}. للتجديد ردّ علينا هنا وسنرسل لك كود التجديد فوراً. شكراً لك 🙏`;
+  return `السلام عليكم ${c.name} 👋\nنذكّرك أن اشتراكك في برنامج ${BRAND.name} ${when}. للتجديد ردّ علينا هنا وسنرسل لك كود التجديد فوراً. شكراً لك 🙏`;
 }
 
 const copy = async (text, okMsg) => {
@@ -169,7 +172,7 @@ function customersTab() {
       ${kpi('منتهون', n(['expired']), 'يحتاجون تجديداً')}
       ${kpi('مستلم هذا الشهر', income ? income.toLocaleString('en-US') + ' ' + CONFIG.currency : '—', 'من المبالغ التي سجّلتها')}
     </div>
-    <div class="toolbar" style="margin-bottom:12px"><input class="inp" type="search" data-search placeholder="🔍 ابحث بالاسم أو الهاتف" value="${state.q}" aria-label="بحث"></div>
+    <div class="toolbar" style="margin-bottom:12px"><input class="inp" type="search" data-search placeholder="ابحث بالاسم أو الهاتف" value="${state.q}" aria-label="بحث"></div>
     <div class="cust-list" data-list></div>`;
 }
 

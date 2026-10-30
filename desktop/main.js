@@ -1,5 +1,5 @@
 'use strict';
-// ═══ احسبها لسطح المكتب: برنامج مثبّت بنافذته وأيقونته، لا يفتح في المتصفح ═══
+// ═══ كنز لسطح المكتب: برنامج مثبّت بنافذته وأيقونته، لا يفتح في المتصفح ═══
 // يعرض واجهة البرنامج من موقعه، فكل تحديث للبرنامج يصل لك تلقائياً بدون إعادة تثبيت،
 // ويعمل بدون إنترنت حتى من أول تشغيل: النسخة الكاملة داخل ملف التثبيت (offline-site.js).
 // بياناتك المحاسبية تبقى على جهازك.
@@ -7,7 +7,7 @@ const { app, BrowserWindow, Menu, net, session, shell } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { makePolicy, permissionAllowed, parseArgs } = require('./policy');
+const { makePolicy, permissionAllowed, parseArgs, userDataDir } = require('./policy');
 const { createOfflineSite } = require('./offline-site');
 
 const START_URL = process.env.AHSEBHA_URL || 'https://ooo518106-rgb.github.io/ahsebha/';
@@ -17,11 +17,14 @@ const SAFE_PREFS = { contextIsolation: true, nodeIntegration: false, sandbox: tr
 let win = null;
 let offlineSite = null;
 
-app.setAppUserModelId('io.github.ooo518106-rgb.ahsebha');
+app.setAppUserModelId('io.github.ooo518106-rgb.ahsebha'); // معرّف تقني ثابت (لا يتغير باسم البرنامج)
 if (args.smoke) {
   // اختبار التشغيل: ملف بيانات مؤقت بدل بيانات المستخدم، وبدون تسريع الرسوميات
-  app.setPath('userData', args.smokeUserData || fs.mkdtempSync(path.join(os.tmpdir(), 'ahsebha-smoke-')));
+  app.setPath('userData', args.smokeUserData || fs.mkdtempSync(path.join(os.tmpdir(), 'kenz-smoke-')));
   app.disableHardwareAcceleration();
+} else {
+  // بيانات المستخدم تبقى في مجلدها القديم رغم تغيير اسم البرنامج (انظر policy.js)
+  app.setPath('userData', userDataDir(app.getPath('appData')));
 }
 
 const openExternal = (url) => { if (policy.isExternal(url)) shell.openExternal(url).catch(() => {}); };
@@ -69,7 +72,7 @@ function harden(contents) {
 }
 app.on('web-contents-created', (e, contents) => harden(contents));
 
-const openDir = () => path.join(app.getPath('temp'), 'ahsebha-open');
+const openDir = () => path.join(app.getPath('temp'), 'kenz-open');
 let smokePdf = null;
 function setupDownloads(ses) {
   // ملفات مؤقتة قديمة (أكثر من أسبوع)
@@ -92,7 +95,7 @@ function setupDownloads(ses) {
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 420, minHeight: 560,
-    show: false, backgroundColor: '#f8fafc', autoHideMenuBar: true, title: 'احسبها',
+    show: false, backgroundColor: '#f8fafc', autoHideMenuBar: true, title: 'كنز',
     webPreferences: SAFE_PREFS,
   });
   win.once('ready-to-show', () => win.show());
@@ -179,10 +182,12 @@ async function runSmoke() {
     await win.webContents.executeJavaScript(PDF_PROBE, true);
     for (let i = 0; i < 40 && !smokePdf; i++) await new Promise((res) => setTimeout(res, 250));
     r.pdf = smokePdf;
+    r.productName = app.getName(); // اسم المنتج الظاهر للنظام
+    r.pinnedUserData = userDataDir(app.getPath('appData')); // مجلد بيانات المستخدم الحقيقي (في الاختبار نستعمل مجلداً مؤقتاً)
     r.offlineSite = offlineSite ? offlineSite.snapshot() : null; // من أين جاءت ملفات البرنامج: الشبكة أم النسخة المحفوظة أم المرفقة
     // على نسخة محلية (اختبار كود هذا التعديل نفسه) نشترط أن يكون البرنامج محفوظاً للعمل بدون إنترنت
     const local = new URL(START_URL).hostname === '127.0.0.1';
-    r.ok = !!(r.ui && r.secure && r.subtle && r.idb && r.ecdsa && /احسبها/.test(r.title) && policy.isApp(r.url) && smokePdf && smokePdf.head === '%PDF-' && (!local || r.sw >= 20));
+    r.ok = !!(r.ui && r.secure && r.subtle && r.idb && r.ecdsa && /كنز|احسبها/.test(r.title) && policy.isApp(r.url) && smokePdf && smokePdf.head === '%PDF-' && (!local || r.sw >= 20));
     finishSmoke(r);
   } catch (e) { finishSmoke({ ok: false, error: String(e && e.message || e) }); }
 }

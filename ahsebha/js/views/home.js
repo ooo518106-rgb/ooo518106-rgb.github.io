@@ -1,7 +1,9 @@
 // ═══ الترحيب وإعداد المنشأة، ولوحة التحكم ═══
 import * as store from '../store.js';
+import { BRAND } from '../brand.js';
 import { COUNTRIES, dashboard as summarize, docNo, stockReport, ymd, monthStart, validSaudiVat, isDate, isPdc, addDays } from '../core.js';
-import { html, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, field, monthName, badge } from '../ui.js';
+import { html, raw, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, field, monthName, badge } from '../ui.js';
+import { icon } from '../icons.js';
 import { go, setTitle, docHref } from '../nav.js';
 import { today, S, partyName, docStatus, taxAuth } from './common.js';
 import { monthlyChart } from './chart.js';
@@ -31,7 +33,7 @@ export function welcome({ root }) {
   setTitle('برنامج محاسبة مجاني');
   const t = today();
   root.innerHTML = String(html`<section class="welcome">
-    <div class="hero-acc"><div class="ic">📒</div><h1>برنامج محاسبة مجاني متكامل</h1>
+    <div class="hero-acc"><div class="ic"><img class="hero-logo" src="icons/icon.svg" alt="" width="84" height="84"></div><h1>برنامج محاسبة مجاني متكامل</h1>
       <p>للمحلات والمتاجر والمؤسسات الصغيرة: بِع واشترِ وسجّل مصاريفك، والبرنامج يعمل القيود والمخزون والضريبة والتقارير عنك.</p>
       <div class="actions"><button class="btn btn-primary" data-start>🚀 ابدأ منشأتك الآن</button><button class="btn btn-ghost" data-demo>🧪 جرّب ببيانات تجريبية</button>${CONFIG.published ? html`<a class="btn btn-ghost" href="plans.html">💳 الباقات والأسعار</a>` : ''}<label class="btn btn-ghost">📂 استعادة نسخة احتياطية<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label></div>
       ${isInstalled() ? '' : html`<p style="margin-top:12px"><button type="button" class="btn btn-ghost btn-sm" data-install-app>💻 ثبّت البرنامج على اللابتوب</button></p>`}
@@ -101,7 +103,7 @@ export async function restoreFile(file) {
     if (buf[0] === 0x50 && buf[1] === 0x4b) {
       entries = unzipEntries(buf);
       const json = await entryText(entries, BACKUP_JSON);
-      if (json == null) throw new Error('هذا الملف ليس نسخة احتياطية من برنامج محاسبة احسبها');
+      if (json == null) throw new Error(`هذا الملف ليس نسخة احتياطية من برنامج محاسبة ${BRAND.name}`);
       data = store.parseBackup(json);
     } else data = store.parseBackup(new TextDecoder().decode(buf));
     const docs = data.docs.length;
@@ -148,11 +150,11 @@ export function dashboard({ root }) {
   const recErr = db.recurring.filter((r) => r.active !== false && r.error);
   const facts = db.docs.length && hasFeature('today') ? summaryFacts(db, B, { preset: 'today', today: t }) : null;
   const teaser = facts ? { facts, line: headline(facts) } : null;
-  const kpi = (label, value, href, sub, cls = '') => html`<a class="kpi" href="${href}"><span class="kpi-l">${label}</span><span class="kpi-v ${cls}">${value}</span>${sub ? html`<span class="kpi-s">${sub}</span>` : ''}</a>`;
+  const kpi = (label, value, href, sub, cls = '', ic = '', tone = '') => html`<a class="kpi" href="${href}">${ic ? html`<span class="kpi-ic ${tone}">${raw(icon(ic))}</span>` : ''}<span class="kpi-l">${label}</span><span class="kpi-v ${cls}">${value}</span>${sub ? html`<span class="kpi-s">${sub}</span>` : ''}</a>`;
   const monthLabel = `${monthName(t)} ${t.slice(0, 4)}`;
 
   root.innerHTML = String(html`
-    <div class="page-head"><div><h2>أهلاً بك 👋</h2><div class="sub">${s.name || ''} · ${fmtDate(t)}${s.country === 'SA' ? ` · ${hijri(t)}` : ''}</div></div>
+    <div class="page-head"><div><h2>أهلاً بك</h2><div class="sub">${s.name || ''} · ${fmtDate(t)}${s.country === 'SA' ? ` · ${hijri(t)}` : ''}</div></div>
       <div class="actions"><a class="btn btn-primary" href="#/sales/new">🧾 فاتورة جديدة</a><a class="btn btn-ghost" href="#/pos">🖥️ الكاشير</a><a class="btn btn-ghost" href="#/expenses/new">💸 مصروف</a></div></div>
     ${db.demo ? html`<p class="note note-info" style="margin-bottom:14px">🧪 هذه بيانات تجريبية للتجربة. عندما تكون جاهزاً: <a href="#/settings">الإعدادات</a> ← «حذف كل البيانات» ثم ابدأ بمنشأتك.</p>` : ''}
     ${needBackup ? html`<p class="note note-warn" style="margin-bottom:14px">💾 ${since == null ? 'لم تنزّل أي نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${since} يوم.`} بياناتك محفوظة على هذا الجهاز فقط. <a href="#/settings" data-backup>نزّل نسخة احتياطية الآن</a></p>` : ''}
@@ -164,14 +166,14 @@ export function dashboard({ root }) {
     ${showSteps ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🚀 خطوات البداية</h3><span class="muted small">${steps.filter((x) => x[1]).length} من ${steps.length}</span></div>
       <div class="list-mini">${steps.map(([label, done, href]) => html`<a href="${href}"><span>${done ? '✅' : '⬜'} ${label}</span>${done ? '' : html`<span class="meta">ابدأ ←</span>`}</a>`)}</div></div>` : ''}
     <div class="grid g4">
-      ${kpi(`مبيعات ${monthName(t)}`, money(D.revenue, { sym: true }), '#/reports/sales', 'صافي بعد المرتجعات وقبل الضريبة')}
-      ${kpi('المصروفات والتكاليف', money(D.expenses, { sym: true }), '#/reports/income', 'تشمل تكلفة البضاعة المباعة')}
-      ${kpi('صافي الربح', money(D.profit, { sym: true }), '#/reports/income', monthLabel, D.profit < 0 ? 'neg' : 'pos')}
-      ${kpi('النقدية والبنوك', money(D.cash, { sym: true }), '#/reports/cash', 'الرصيد المتوفر الآن')}
-      ${kpi('مستحق من العملاء', money(D.receivable, { sym: true }), '#/collections', D.overdue.length ? `${D.overdue.length} فاتورة متأخرة · تذكير واتساب` : 'لا توجد متأخرات')}
-      ${kpi('مستحق للموردين', money(D.payable, { sym: true }), '#/reports/aging-ap')}
-      ${s.vat ? kpi(D.vatDue >= 0 ? `ضريبة مستحقة لل${taxAuth().slice(2)}` : 'ضريبة قابلة للاسترداد', money(Math.abs(D.vatDue), { sym: true }), '#/reports/vat', 'الرصيد غير المسدد') : ''}
-      ${kpi('قيمة المخزون', money(stockValue, { sym: true }), '#/reports/stock', D.low.length ? `${D.low.length} صنف قارب على النفاد` : 'بالتكلفة المتوسطة')}
+      ${kpi(`مبيعات ${monthName(t)}`, money(D.revenue, { sym: true }), '#/reports/sales', 'صافي بعد المرتجعات وقبل الضريبة', '', 'trending-up')}
+      ${kpi('المصروفات والتكاليف', money(D.expenses, { sym: true }), '#/reports/income', 'تشمل تكلفة البضاعة المباعة', '', 'wallet', 'warn')}
+      ${kpi('صافي الربح', money(D.profit, { sym: true }), '#/reports/income', monthLabel, D.profit < 0 ? 'neg' : 'pos', 'coins', D.profit < 0 ? 'bad' : 'ok')}
+      ${kpi('النقدية والبنوك', money(D.cash, { sym: true }), '#/reports/cash', 'الرصيد المتوفر الآن', '', 'landmark', 'info')}
+      ${kpi('مستحق من العملاء', money(D.receivable, { sym: true }), '#/collections', D.overdue.length ? `${D.overdue.length} فاتورة متأخرة · تذكير واتساب` : 'لا توجد متأخرات', '', 'users')}
+      ${kpi('مستحق للموردين', money(D.payable, { sym: true }), '#/reports/aging-ap', '', '', 'factory', 'warn')}
+      ${s.vat ? kpi(D.vatDue >= 0 ? `ضريبة مستحقة لل${taxAuth().slice(2)}` : 'ضريبة قابلة للاسترداد', money(Math.abs(D.vatDue), { sym: true }), '#/reports/vat', 'الرصيد غير المسدد', '', 'receipt-text', 'muted') : ''}
+      ${kpi('قيمة المخزون', money(stockValue, { sym: true }), '#/reports/stock', D.low.length ? `${D.low.length} صنف قارب على النفاد` : 'بالتكلفة المتوسطة', '', 'package', 'info')}
     </div>
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>الإيرادات والمصروفات — آخر ستة أشهر</h3><a class="small" href="#/reports/income">قائمة الدخل ←</a></div><div data-chart></div></div>
     <div class="grid g2" style="margin-top:14px">
@@ -206,7 +208,7 @@ export function dashboard({ root }) {
   if (bk) bk.onclick = (e) => { e.preventDefault(); downloadBackup(); };
 }
 
-const backupName = (kind, ext) => `احسبها-${kind}-${(S().name || 'منشأتي').replace(/[\\/:*?"<>|\s]+/g, '-')}-${ymd(new Date())}.${ext}`;
+const backupName = (kind, ext) => `${BRAND.name}-${kind}-${(S().name || 'منشأتي').replace(/[\\/:*?"<>|\s]+/g, '-')}-${ymd(new Date())}.${ext}`;
 function save(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

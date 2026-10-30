@@ -8,7 +8,7 @@ import { html, raw, money, qty, fmtDate, toast, confirmBox, empty, $, exportTabl
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { head, bindRows, today, S, dec, taxLabel, partyName, periodOf, periodBar, bindPeriod, periodLabel, printReport, csvName, accName, taxAuth } from './common.js';
 
-const REPORTS = [
+export const REPORTS = [
   { sec: 'القوائم المالية' },
   { id: 'income', icon: '📈', t: 'قائمة الدخل', d: 'الإيرادات والتكاليف والمصروفات وصافي الربح' },
   { id: 'balance', icon: '⚖️', t: 'الميزانية العمومية', d: 'الأصول والخصوم وحقوق الملكية في تاريخ معين' },

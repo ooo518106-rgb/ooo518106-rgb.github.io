@@ -1,11 +1,11 @@
 // عامل الخدمة: يشغّل البرنامج بدون إنترنت. الشبكة أولاً دائماً حتى تصل التحديثات فوراً،
 // والنسخة المخزنة تُستخدم فقط عند انقطاع الاتصال. وعند التثبيت نحفظ ملفات البرنامج كلها فوراً،
 // فيعمل بدون إنترنت بعد أول زيارة (وليس بعد الثانية فقط).
-const CACHE = 'ahsebha-accounting-v8';
+const CACHE = 'ahsebha-accounting-v9';
 
 // الملفات الأساسية، ثم نتتبّع ما تستورده ملفات جافاسكربت (static وdynamic) فنحفظها كلها.
 // المكتبات الكبيرة (قراءة النص والباركود) تُحفظ عند أول استخدام لها فقط.
-const SHELL = ['./', 'index.html', 'app.css', 'manifest.json', 'js/app.js', 'vendor/qrcode.js', 'icons/icon.svg', 'icons/icon-192.png'];
+const SHELL = ['./', 'index.html', 'app.css', 'fonts/fonts.css', 'fonts/plex-arabic-400.woff2', 'fonts/plex-arabic-500.woff2', 'fonts/plex-arabic-600.woff2', 'fonts/plex-arabic-700.woff2', 'fonts/plex-latin-400.woff2', 'fonts/plex-latin-500.woff2', 'fonts/plex-latin-600.woff2', 'fonts/plex-latin-700.woff2', 'manifest.json', 'js/app.js', 'vendor/qrcode.js', 'icons/icon.svg', 'icons/icon-192.png'];
 const IMPORT_RE = /(?:^|[\s;{}()])(?:import|export)\s*(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 async function precache() {
   try {

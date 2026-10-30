@@ -1,5 +1,6 @@
 // ═══ التخزين: كل البيانات على جهاز المستخدم (IndexedDB، وبديله localStorage) ═══
 import { SCHEMA, defaultAccounts, defaultSettings, buildBooks, validateDoc, isLockedDate, docAmount, currencyInfo, ymd, addDays, addMonths, monthStart, monthEnd, daysBetween, isDate } from './core.js';
+import { BRAND } from './brand.js';
 import { docGate, docCreated, demoError } from './license.js';
 
 const APP_ID = 'ahsebha-accounting';
@@ -541,7 +542,7 @@ export function backupJSON() {
 export function parseBackup(text) {
   let d;
   try { d = JSON.parse(text); } catch (e) { throw new Error('الملف ليس نسخة احتياطية صالحة'); }
-  if (!isObj(d) || d.app !== APP_ID || !Array.isArray(d.docs)) throw new Error('هذا الملف ليس نسخة احتياطية من برنامج محاسبة احسبها');
+  if (!isObj(d) || d.app !== APP_ID || !Array.isArray(d.docs)) throw new Error(`هذا الملف ليس نسخة احتياطية من برنامج محاسبة ${BRAND.name}`);
   if ((Number(d.schema) || 1) > SCHEMA) throw new Error('النسخة من إصدار أحدث. حدّث الصفحة ثم حاول مجدداً');
   return normalize(d);
 }

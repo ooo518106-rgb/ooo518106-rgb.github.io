@@ -1,8 +1,11 @@
 // ═══ صفحة الباقات والاشتراكات: كل محتواها من js/plans.js، فتعديل الأسعار والميزات هناك يكفي ═══
 import { CONFIG, FEATURES, PLANS, planFeatures } from './plans.js';
+import { BRAND } from './brand.js';
 import { contactLink, trialOn, invoicesText } from './license.js';
 import { html } from './ui.js';
 
+import { watchIcons } from './icons.js';
+watchIcons();
 const root = document.getElementById('sales');
 const plans = Object.values(PLANS);
 const paid = plans.filter((p) => p.id !== 'free');
@@ -48,7 +51,7 @@ function priceBlock(p) {
 
 function cta(p) {
   if (p.id === 'free') return html`<a class="btn btn-ghost" href="./">ابدأ مجاناً</a>`;
-  const wa = contactLink(`السلام عليكم، أريد الاشتراك في باقة «${p.name}» من برنامج احسبها.`);
+  const wa = contactLink(`السلام عليكم، أريد الاشتراك في باقة «${p.name}» من برنامج ${BRAND.name}.`);
   return wa
     ? html`<a class="btn btn-primary" href="${wa}" target="_blank" rel="noopener" data-cta="${p.id}">💬 اطلب الاشتراك</a>`
     : html`<span class="btn btn-ghost" aria-disabled="true">طريقة الطلب قريباً</span>`;
@@ -87,7 +90,7 @@ function render() {
   const toggle = paid.some(hasBoth);
   root.innerHTML = String(html`
     ${previewNote()}
-    <section class="hero-acc sales-hero"><div class="ic">📒</div>
+    <section class="hero-acc sales-hero"><div class="ic"><img class="hero-logo" src="icons/icon.svg" alt="" width="84" height="84"></div>
       <h1>برنامج محاسبة عربي بسيط لمحلك أو شركتك</h1>
       <p>فواتير ضريبية، كاشير بالباركود، مخزون، مشتريات، رواتب وتقارير مالية كاملة. يعمل من المتصفح، وبياناتك تبقى على جهازك.</p>
       <div class="actions" style="justify-content:center"><a class="btn btn-primary" href="./">🧪 جرّب مجاناً ببيانات تجريبية</a>${trialOn() ? html`<a class="btn btn-ghost" href="download.html#demo" data-demo-download>⬇️ حمّل نسخة العرض</a>` : ''}<a class="btn btn-ghost" href="#plans">شاهد الباقات</a></div>

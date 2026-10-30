@@ -3,7 +3,8 @@
 // ولكل مستخدم دور يحدد الشاشات المسموحة. الرمز يُحفظ مجزّأً (PBKDF2) وليس كنص.
 // تنبيه: القفل يمنع الاستخدام غير المصرّح به من الواجهة، ولا يشفّر البيانات على الجهاز.
 import * as store from './store.js';
-import { html } from './ui.js';
+import { BRAND, logoImg } from './brand.js';
+import { html, raw } from './ui.js';
 
 export const ROLES = {
   owner: { name: 'المالك', desc: 'كل الصلاحيات، وإدارة المستخدمين والنسخ الاحتياطية' },
@@ -197,7 +198,7 @@ function showLock() {
 
   function draw(mode = 'pin') {
     el.innerHTML = String(html`<div class="lock-box" aria-label="تسجيل الدخول">
-      <div class="lock-brand"><span class="brand-badge">📒</span><div><b>${db.settings.name || 'احسبها'}</b><small>برنامج المحاسبة</small></div></div>
+      <div class="lock-brand"><span class="brand-badge">${raw(logoImg(40))}</span><div><b>${db.settings.name || BRAND.name}</b><small>${BRAND.tagline}</small></div></div>
       ${mode === 'recover' ? html`
         <h2>استرجاع دخول المالك</h2>
         <p class="muted small">اكتب رمز الاسترجاع الذي ظهر لك عند تفعيل المستخدمين (مثل ABCD-EFGH-JKLM).</p>

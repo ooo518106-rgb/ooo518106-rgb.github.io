@@ -1,9 +1,12 @@
 // ═══ الاشتراك: حالة باقتك وميزاتك، تفعيل الكود، وصفحات القفل للميزات غير المشمولة ═══
 // بيانات المحاسبة لا تُقفل أبداً: عند انتهاء الاشتراك تُقفل الميزات المدفوعة فقط، والنسخ الاحتياطي متاح دائماً.
 import * as store from '../store.js';
+import { BRAND } from '../brand.js';
 import * as lic from '../license.js';
 import { CONFIG, FEATURES, PLANS, featureById, planFeatures } from '../plans.js';
-import { html, toast, confirmBox, modal, fmtDate, $ } from '../ui.js';
+import { html, raw, toast, confirmBox, modal, fmtDate, $ } from '../ui.js';
+import { icon } from '../icons.js';
+import { daysBetween } from '../core.js';
 import { setTitle, go, SEG } from '../nav.js';
 import { head, countAr } from './common.js';
 
@@ -12,7 +15,7 @@ const daysText = (n) => (n === 0 ? 'اليوم' : countAr(n, DAYS));
 
 // أين يرى الزبون الباقات؟ صفحة الأسعار تظهر فقط بعد أن ينشرها المالك (أو في معاينة المالك)
 const showPlansLink = () => CONFIG.published || lic.previewing();
-const wantText = (what) => `السلام عليكم، أريد ${what} في برنامج احسبها.`;
+const wantText = (what) => `السلام عليكم، أريد ${what} في برنامج ${BRAND.name}.`;
 
 // أزرار التواصل لطلب الاشتراك أو التجديد
 function actions(what = 'الاشتراك', { extra = '' } = {}) {
@@ -147,48 +150,66 @@ export async function activate({ root, query }) {
     <p><a class="btn btn-primary" href="${store.getDb() ? '#/subscription' : '#/welcome'}">${store.getDb() ? 'الصق الكود يدوياً' : 'العودة'}</a></p></div>`);
 }
 
-// ─── صفحة اشتراكي ───
+// ─── صفحة اشتراكي: لوحة الزبون (باقته، المتبقي، التفعيل، الميزات، كود الجهاز) ───
+const pctOf = (v) => Math.max(0, Math.min(100, Math.round(v)));
+const hero = ({ tone, ic, kicker, title, badge, line, big, small, pct, label, actions: acts, attr = '', meterCls = '' }) => html`<div class="card sub-card sub-hero tone-${tone}" ${raw(attr)}>
+  <div class="sub-hero-main"><span class="sub-ic">${raw(icon(ic))}</span>
+    <div class="sub-hero-text"><div class="sub-kicker">${kicker}</div>
+      <h3 class="sub-plan">${title}${badge ? html` <span class="badge badge-${badge[0]}">${badge[1]}</span>` : ''}</h3>
+      <p class="sub-line">${line}</p></div></div>
+  ${pct != null ? html`<div class="sub-hero-side"><div class="sub-days"><b class="n">${big}</b><span>${small}</span></div>
+    <div class="sub-meter ${meterCls}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${label}"><span style="width:${pct}%"></span></div></div>` : ''}
+  ${acts ? html`<div class="actions sub-hero-actions">${acts}</div>` : ''}</div>`;
+
 export function view({ root }) {
   setTitle('اشتراكي');
   const on = lic.enforcing();
   const e = lic.entitlement();
   const problem = lic.storedProblem();
   const lastBackup = store.getDb() && store.getDb().settings.lastBackupAt;
+  const clearBtn = html`<button type="button" class="btn btn-ghost btn-sm" data-clear>إلغاء التفعيل على هذا الجهاز</button>`;
+  const prob = problem ? html`<p class="note note-warn" style="margin-bottom:14px">⚠️ الكود المحفوظ على هذا الجهاز لا يعمل: ${lic.REASONS[problem] || ''}</p>` : '';
+  const wait = !on ? html`<p class="note note-info" style="margin-bottom:14px">ℹ️ الاشتراكات لم تبدأ بعد: كل الميزات مفتوحة الآن للجميع.</p>` : '';
 
-  const statusCard = () => {
-    const wait = !on ? html`<p class="note note-info" style="margin-bottom:12px">ℹ️ الاشتراكات لم تبدأ بعد: كل الميزات مفتوحة الآن للجميع.</p>` : '';
-    const prob = problem ? html`<p class="note note-warn" style="margin-bottom:12px">⚠️ الكود المحفوظ على هذا الجهاز لا يعمل: ${lic.REASONS[problem] || ''}</p>` : '';
+  // الاشتراك الحقيقي: الباقة والمتبقي والتجديد
+  const statusHero = () => {
     if (e.status === 'free') {
-      return html`<div class="card sub-card">${wait}${prob}<div class="card-h"><h3>💳 باقتك الحالية: ${e.planName}</h3></div>
-        <p class="today-text">تعمل كل الميزات الأساسية: الفواتير والعملاء والمنتجات والمصروفات والتقارير والنسخ الاحتياطي. اشترك لتفتح باقي الميزات.</p>
-        <div class="actions" style="margin-top:12px">${actions()}</div></div>`;
+      return hero({
+        tone: 'info', ic: 'sparkles', kicker: 'باقتك الحالية', title: e.planName,
+        line: 'تعمل كل الميزات الأساسية: الفواتير والعملاء والمنتجات والمصروفات والتقارير والنسخ الاحتياطي. اشترك لتفتح باقي الميزات.',
+        actions: actions(),
+      });
     }
-    const line = e.status === 'lifetime' ? 'اشتراك دائم بلا تاريخ انتهاء'
-      : e.status === 'active' ? `ينتهي ${fmtDate(e.exp)} (باقي ${daysText(e.daysLeft)})`
-        : e.status === 'grace' ? `انتهى ${fmtDate(e.exp)}، والميزات تعمل ${daysText(e.graceLeft)} إضافية ثم تُقفل`
-          : `انتهى في ${fmtDate(e.exp)} وعدت للباقة المجانية`;
     const warn = e.status === 'grace' || e.status === 'expired' || (e.status === 'active' && e.daysLeft <= 7);
-    return html`<div class="card sub-card ${warn ? 'sub-warn' : 'sub-ok'}">${wait}${prob}<div class="card-h"><h3>${e.status === 'expired' ? '🔒' : warn ? '⏳' : '✅'} باقتك: ${e.planName}</h3>
-      <button type="button" class="btn btn-ghost btn-sm" data-clear>إلغاء التفعيل على هذا الجهاز</button></div>
-      <p class="today-text">${line}${e.customer ? html`<br><span class="muted small">مرخّص لـ: ${e.customer}</span>` : ''}</p>
-      ${e.status === 'expired' ? html`<p class="muted small" style="margin-top:8px">بياناتك كلها محفوظة. ${lastBackup ? '' : 'نزّل نسخة احتياطية من '}<a href="#/settings">الإعدادات</a>${lastBackup ? ' ← النسخ الاحتياطي متاح دائماً.' : '.'}</p>` : ''}
-      ${warn ? html`<div class="actions" style="margin-top:12px">${actions('تجديد الاشتراك')}</div>` : ''}</div>`;
+    const tone = e.status === 'expired' ? 'bad' : warn ? 'warn' : 'ok';
+    const total = e.issued && e.exp ? Math.max(1, daysBetween(e.issued, e.exp) + 1) : 0;
+    const line = e.status === 'lifetime' ? 'اشتراك دائم بلا تاريخ انتهاء'
+      : e.status === 'active' ? `ينتهي ${fmtDate(e.exp)}`
+        : e.status === 'grace' ? `انتهى ${fmtDate(e.exp)}، والميزات تعمل مدة إضافية ثم تُقفل`
+          : `انتهى في ${fmtDate(e.exp)} وعدت للباقة المجانية. بياناتك كلها محفوظة.`;
+    const m = e.status === 'lifetime' ? { big: '∞', small: 'اشتراك دائم', pct: 100 }
+      : e.status === 'active' ? { big: e.daysLeft, small: 'يوم متبقٍ', pct: total ? pctOf((e.daysLeft / total) * 100) : 100 }
+        : e.status === 'grace' ? { big: e.graceLeft, small: 'يوم مهلة إضافية', pct: pctOf((e.graceLeft / Math.max(1, CONFIG.graceDays)) * 100) }
+          : { big: 0, small: 'منتهي', pct: 0 };
+    const cust = e.customer ? html` · مرخّص لـ ${e.customer}` : '';
+    const acts = html`${warn ? actions('تجديد الاشتراك') : ''}${clearBtn}${e.status === 'expired' ? html`<a class="btn btn-ghost btn-sm" href="#/settings">${lastBackup ? 'النسخ الاحتياطي' : 'نزّل نسخة احتياطية'}</a>` : ''}`;
+    return hero({
+      tone, ic: e.status === 'expired' ? 'lock' : warn ? 'triangle-alert' : 'badge-check', kicker: 'باقتك الحالية', title: e.planName,
+      badge: e.status === 'expired' ? ['bad', 'منتهي'] : e.status === 'grace' ? ['warn', 'في المهلة'] : e.status === 'lifetime' ? ['info', 'دائم'] : warn ? ['warn', 'ينتهي قريباً'] : ['ok', 'ساري'],
+      line: html`${line}${cust}`, big: m.big, small: m.small, pct: m.pct, label: 'المدة المتبقية من الاشتراك', actions: acts,
+    });
   };
 
-  // نسخة العرض: بطاقة بالمتبقي من الفواتير والمدة تحلّ مكان بطاقة الباقة (والاشتراك الحقيقي المنتهي يبقى ظاهراً تحتها)
-  const demoCard = (d) => {
-    const pct = Math.min(100, Math.round((d.used / d.limit) * 100));
-    const prob = problem ? html`<p class="note note-warn" style="margin-bottom:12px">⚠️ الكود المحفوظ على هذا الجهاز لا يعمل: ${lic.REASONS[problem] || ''}</p>` : '';
-    return html`<div class="card sub-card ${d.blocked ? 'sub-warn' : 'sub-demo'}" data-demo-card>${prob}
-      <div class="card-h"><h3>🧪 ${d.blocked ? 'انتهت نسخة العرض' : 'أنت تستعمل نسخة العرض'}</h3>
-        ${d.source === 'code' ? html`<button type="button" class="btn btn-ghost btn-sm" data-clear>إلغاء التفعيل على هذا الجهاز</button>` : ''}</div>
-      <p class="today-text">${demoWhy(d)}${d.exp ? html`<br><span class="muted small">${d.expired ? 'انتهت في' : 'تنتهي في'} ${fmtDate(d.exp)}${d.expired ? '' : d.daysLeft === 0 ? ' (آخر يوم اليوم)' : ` (باقي ${daysText(d.daysLeft)})`}</span>` : ''}</p>
-      <div class="demo-meter" role="progressbar" aria-valuemin="0" aria-valuemax="${d.limit}" aria-valuenow="${d.used}" aria-label="الفواتير المستعملة"><span style="width:${pct}%"></span></div>
-      <p class="muted small" style="margin-top:6px">استعملت ${d.used} من ${d.limit}. كل الميزات مفتوحة للتجربة، والفواتير تحمل علامة «نسخة تجريبية». عند التفعيل ترتفع هذه الحدود وتبقى بياناتك كما هي.</p>
-      <div class="actions" style="margin-top:12px">${actions('تفعيل الاشتراك بعد تجربة النسخة')}</div></div>`;
-  };
+  // نسخة العرض: المتبقي من الفواتير والمدة (والاشتراك الحقيقي المنتهي يبقى ظاهراً تحتها)
+  const demoHero = (d) => hero({
+    tone: d.blocked ? 'warn' : 'info', ic: 'flask-conical', kicker: 'نسخة العرض', title: d.blocked ? 'انتهت نسخة العرض' : 'أنت تستعمل نسخة العرض',
+    badge: d.blocked ? ['warn', 'متوقفة'] : ['info', 'للتجربة'],
+    line: html`${demoWhy(d)}${d.exp ? html` ${d.expired ? 'انتهت في' : 'تنتهي في'} ${fmtDate(d.exp)}${d.expired ? '' : d.daysLeft === 0 ? ' (آخر يوم اليوم)' : ` (باقي ${daysText(d.daysLeft)})`}.` : ''} استعملت ${d.used} من ${d.limit}. كل الميزات مفتوحة للتجربة والفواتير تحمل علامة «نسخة تجريبية». عند التفعيل ترتفع الحدود وتبقى بياناتك كما هي.`,
+    big: d.left, small: `من ${d.limit} فواتير متبقية`, pct: pctOf((d.used / d.limit) * 100), label: 'الفواتير المستعملة', meterCls: 'demo-meter',
+    actions: html`${actions('تفعيل الاشتراك بعد تجربة النسخة')}${d.source === 'code' ? clearBtn : ''}`, attr: 'data-demo-card',
+  });
   const demoNow = lic.demo();
-  const top = () => (demoNow ? html`${demoCard(demoNow)}${e.status === 'expired' ? statusCard() : ''}` : statusCard());
+  const top = () => (demoNow ? html`${demoHero(demoNow)}${e.status === 'expired' ? html`<div style="margin-top:16px">${statusHero()}</div>` : ''}` : statusHero());
 
   const rows = FEATURES.map((f) => {
     const has = lic.has(f.id);
@@ -200,20 +221,22 @@ export function view({ root }) {
   const open = FEATURES.filter((f) => lic.has(f.id)).length;
 
   root.innerHTML = String(html`${head('اشتراكي', { sub: 'باقتك وميزاتك وتفعيل كود الاشتراك' })}
-    ${top()}
-    <div class="card" style="margin-top:14px"><div class="card-h"><h3>🔑 تفعيل كود الاشتراك</h3></div>
-      <form data-form novalidate class="stack">
-        <label class="fld"><span class="fld-l">الصق الكود أو رابط التفعيل الذي وصلك</span>
-          <textarea class="inp" name="code" rows="3" dir="ltr" placeholder="AHS1.…" autocomplete="off" spellcheck="false"></textarea>
-          <small class="fld-e" data-err hidden></small></label>
-        <div><button class="btn btn-primary">تفعيل</button></div>
-      </form></div>
-    <div class="card" style="margin-top:14px"><div class="card-h"><h3>✨ الميزات</h3><span class="muted small">${open} من ${FEATURES.length} متاحة</span></div>
+    ${wait}${prob}${top()}
+    <div class="sub-grid">
+      <div class="card"><div class="card-h"><h3>🔑 تفعيل كود الاشتراك</h3></div>
+        <form data-form novalidate class="stack">
+          <label class="fld"><span class="fld-l">الصق الكود أو رابط التفعيل الذي وصلك</span>
+            <textarea class="inp" name="code" rows="3" dir="ltr" placeholder="AHS1.…" autocomplete="off" spellcheck="false"></textarea>
+            <small class="fld-e" data-err hidden></small></label>
+          <div><button class="btn btn-primary">تفعيل</button></div>
+        </form></div>
+      <div class="card"><div class="card-h"><h3>📱 كود هذا الجهاز</h3></div>
+        <p class="muted small">إذا طلبت اشتراكاً مرتبطاً بجهاز واحد أرسل هذا الكود لمزوّد البرنامج. أغلب الاشتراكات لا تحتاجه.</p>
+        <div class="inline" style="margin-top:10px"><code class="dev-code" dir="ltr" data-device>${lic.deviceCode()}</code><button type="button" class="btn btn-ghost btn-sm" data-copy>نسخ</button></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h3>✨ الميزات</h3><span class="muted small">${open} من ${FEATURES.length} متاحة</span></div>
       <ul class="feat-list">${rows}</ul>
-      <p class="muted small" style="margin-top:10px">الفواتير والعملاء والمنتجات والمصروفات والسندات والتقارير والنسخ الاحتياطي أساسية ومتاحة دائماً.</p></div>
-    <div class="card" style="margin-top:14px"><div class="card-h"><h3>📱 كود هذا الجهاز</h3></div>
-      <p class="muted small">إذا طلبت اشتراكاً مرتبطاً بجهاز واحد أرسل هذا الكود لمزوّد البرنامج. أغلب الاشتراكات لا تحتاجه.</p>
-      <div class="inline" style="margin-top:8px"><code class="dev-code" dir="ltr" data-device>${lic.deviceCode()}</code><button type="button" class="btn btn-ghost btn-sm" data-copy>نسخ</button></div></div>`);
+      <p class="muted small" style="margin-top:12px">الفواتير والعملاء والمنتجات والمصروفات والسندات والتقارير والنسخ الاحتياطي أساسية ومتاحة دائماً.</p></div>`);
 
   const form = $('[data-form]', root);
   const err = $('[data-err]', root);

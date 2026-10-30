@@ -1,5 +1,7 @@
 // ═══ التنقل: روابط المستندات، قراءة العنوان، والتنبيه قبل ترك نموذج غير محفوظ ═══
 
+import { BRAND } from './brand.js';
+
 // مقطع الرابط لكل نوع مستند
 export const SEG = {
   sale: 'sales', quote: 'quotes', sreturn: 'sales-returns', purchase: 'purchases', preturn: 'purchase-returns',
@@ -41,7 +43,7 @@ export const guard = { dirty: false };
 export function setTitle(t) {
   const el = document.getElementById('topbar-title');
   if (el) el.textContent = t;
-  document.title = t + ' — محاسبة احسبها';
+  document.title = `${t} — ${BRAND.name}`;
 }
 
 // إعادة عرض الصفحة الحالية بعد تعديل البيانات
