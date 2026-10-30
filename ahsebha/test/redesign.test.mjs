@@ -1,7 +1,7 @@
 // اختبارات التصميم الجديد: الأيقونات، اسم البرنامج وخطه، والبحث السريع (Ctrl+K)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { icon, iconFor, iconNames } from '../js/icons.js';
 import { ICONS, FILLED, EMOJI } from '../js/icons-data.js';
 import { BRAND, logoImg } from '../js/brand.js';
@@ -138,4 +138,15 @@ test('البحث السريع: سقف لعدد كل مجموعة', () => {
   const many = { ...db, parties: Array.from({ length: 40 }, (_, i) => ({ id: 'x' + i, kind: 'customer', name: 'عميل ' + i })) };
   const r = search(buildIndex({ db: many, pages, actions, can: () => true, routePerm: (x) => x }), 'عميل');
   assert.ok(r.filter((x) => x.g === 'party').length <= 6);
+});
+
+// ─── لا بقايا من الاسم القديم في نصوص يراها المستخدم ───
+test('لا «Ahsebha» بنصوص الواجهة: أسماء الملفات والتطبيق تُقرأ من downloads.js وbrand.js', () => {
+  const walk = (dir) => readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (['vendor', 'fonts', 'store', 'icons', 'test'].includes(e.name) ? [] : walk(`${dir}${e.name}/`)) : [`${dir}${e.name}`]));
+  const files = walk('').filter((f) => /\.(js|html)$/.test(f));
+  assert.ok(files.length > 40, 'وجدنا ملفات البرنامج');
+  const bad = files.filter((f) => f !== 'js/changelog.js' && /Ahsebha/.test(read(f))); // سجل التحديثات يذكر الاسم القديم تاريخياً
+  assert.deepEqual(bad, [], 'الاسم الظاهر «كنز»/Kenz؛ المعرّفات التقنية بحروف صغيرة ahsebha');
+  // صفحة التنزيلات تأخذ أسماء الملفات من downloads.js بدل كتابتها يدوياً
+  assert.match(read('js/download-page.js'), /file\('win'\)/);
 });

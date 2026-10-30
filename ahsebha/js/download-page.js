@@ -1,5 +1,5 @@
 // ═══ صفحة تحميل تطبيق اللابتوب: تقترح الملف المناسب لجهازك وتشرح التحذير الذي يظهر أول مرة ═══
-import { DOWNLOADS, detectOS, downloadUrl, releasesUrl, forOS } from './downloads.js';
+import { DOWNLOADS, detectOS, downloadUrl, releasesUrl, forOS, fetchDigests } from './downloads.js';
 import { BRAND } from './brand.js';
 import { CONFIG } from './plans.js';
 import { trialOn, contactLink, invoicesText, previewing } from './license.js';
@@ -11,6 +11,8 @@ const root = document.getElementById('download');
 const os = detectOS();
 const mobile = os === 'ios' || os === 'android';
 
+// أسماء الملفات تُقرأ من downloads.js دائماً: لا نكتبها يدوياً في النصوص فلا تتخلف عن الأسماء الحقيقية
+const file = (id) => DOWNLOADS.find((d) => d.id === id).file;
 const btn = (d, primary, label = `${d.icon} ${d.name}`) => html`<a class="btn ${primary ? 'btn-primary' : 'btn-ghost'}" href="${downloadUrl(d.file)}" data-dl="${d.id}" rel="noopener">⬇️ ${label}</a>`;
 
 function hero() {
@@ -54,17 +56,17 @@ const steps = () => html`<section class="sales-sec"><div class="sec-head"><h2>أ
     <p class="muted">الملفات غير موقّعة رقمياً بعد، فيعرض النظام تحذيراً عند أول تشغيل. هذا متوقع وليس فيروساً، وهذه خطوات المتابعة:</p></div>
   <div class="dl-steps">
     <details ${os === 'windows' ? 'open' : ''} data-help="windows"><summary>🪟 ويندوز</summary><ol class="install-steps">
-      <li>شغّل الملف <b dir="ltr">Ahsebha-Setup.exe</b> من مجلد التنزيلات. إن حظره المتصفح فاضغط ⋯ بجانب التنزيل ثم «الاحتفاظ».</li>
+      <li>شغّل الملف <b dir="ltr">${file('win')}</b> من مجلد التنزيلات. إن حظره المتصفح فاضغط ⋯ بجانب التنزيل ثم «الاحتفاظ».</li>
       <li>إن ظهرت شاشة «Windows protected your PC»: اضغط «مزيد من المعلومات» ثم «تشغيل على أي حال».</li>
       <li>يتثبت تلقائياً، وتظهر أيقونة «${BRAND.name}» على سطح المكتب وفي قائمة ابدأ، ويفتح البرنامج.</li></ol></details>
     <details ${os === 'mac' ? 'open' : ''} data-help="mac"><summary>🍎 ماك</summary><ol class="install-steps">
       <li>لمعرفة معالج جهازك: شعار Apple ← «حول هذا الـ Mac». إن كُتب «Apple M…» فنزّل ملف Apple، وإن كُتب «Intel» فنزّل ملف Intel.</li>
-      <li>افتح ملف <b dir="ltr">.dmg</b> واسحب «Ahsebha» إلى مجلد Applications.</li>
-      <li>أول مرة: من Applications اضغط بالزر الأيمن على «Ahsebha» ← «فتح» ← «فتح».</li>
+      <li>افتح ملف <b dir="ltr">.dmg</b> واسحب «${BRAND.name}» (<span dir="ltr">${BRAND.latin}</span>) إلى مجلد Applications.</li>
+      <li>أول مرة: من Applications اضغط بالزر الأيمن على «${BRAND.name}» ← «فتح» ← «فتح».</li>
       <li>إن لم يظهر خيار الفتح (ماك 15 وما بعده): إعدادات النظام ← «الخصوصية والأمان» ← انزل للأسفل واضغط «فتح على أي حال»، ثم أدخل كلمة سر الجهاز.</li>
       <li>عند أول استخدام للكاميرا (قراءة الباركود) سيطلب النظام الإذن، وافق.</li></ol></details>
     <details ${os === 'linux' ? 'open' : ''} data-help="linux"><summary>🐧 لينكس</summary><ol class="install-steps">
-      <li>اجعل الملف قابلاً للتنفيذ: خصائص الملف ← السماح بتنفيذه، أو <b dir="ltr">chmod +x Ahsebha-linux-x64.AppImage</b>.</li>
+      <li>اجعل الملف قابلاً للتنفيذ: خصائص الملف ← السماح بتنفيذه، أو <b dir="ltr">chmod +x ${file('linux')}</b>.</li>
       <li>شغّله بنقرتين. إن لم يعمل على أوبونتو فثبّت <b dir="ltr">sudo apt install libfuse2t64</b> (أو <b dir="ltr">libfuse2</b>).</li></ol></details>
   </div></section>`;
 
@@ -78,8 +80,26 @@ const notes = () => html`<section class="sales-sec"><div class="sec-head"><h2>م
     <li>كل الإصدارات وملاحظاتها: <a href="${releasesUrl}" rel="noopener">صفحة الإصدارات</a>.</li>
   </ul></section>`;
 
+// تأكد أن ملفك أصلي: بصمة كل ملف تُجلب من صفحة الإصدار الرسمية وتتجدد وحدها مع كل إصدار
+const verify = () => html`<section class="sales-sec" id="verify"><div class="sec-head"><h2>تأكد أن الملف أصلي</h2>
+    <p class="muted">لكل ملف بصمة (SHA-256). احسب بصمة الملف الذي نزّلته وقارنها بالموجودة هنا: إن تطابقت فهو نفس الملف المنشور وما عدّل عليه أحد.</p></div>
+  <div class="hash-list" data-hashes aria-live="polite"><p class="muted small">جارٍ جلب البصمات…</p></div>
+  <details class="hash-help"><summary>كيف أحسب بصمة ملفي؟</summary><ul class="install-steps">
+    <li>ويندوز: افتح مجلد التنزيلات، واكتب بـPowerShell: <b dir="ltr">Get-FileHash ${file('win')}</b></li>
+    <li>ماك: افتح Terminal واكتب: <b dir="ltr">cd ~/Downloads &amp;&amp; shasum -a 256 ${file('mac-arm64')}</b></li>
+    <li>لينكس: <b dir="ltr">sha256sum ${file('linux')}</b></li></ul></details></section>`;
+
+function showHashes(map) {
+  const el = root.querySelector('[data-hashes]');
+  if (!el) return;
+  el.innerHTML = String(map
+    ? html`${DOWNLOADS.filter((d) => map[d.file]).map((d) => html`<div class="hash-row"><b dir="ltr">${d.file}</b><code dir="ltr" data-hash="${d.id}">${map[d.file]}</code></div>`)}`
+    : html`<p class="muted small">تعذّر جلب البصمات الآن (تحتاج اتصالاً بالإنترنت). تجدها أيضاً في <a href="${releasesUrl}" rel="noopener">صفحة الإصدارات</a>.</p>`);
+}
+
 function render() {
-  root.innerHTML = String(html`${hero()}${demo()}${all()}${steps()}${notes()}`);
+  root.innerHTML = String(html`${hero()}${demo()}${all()}${steps()}${verify()}${notes()}`);
+  fetchDigests().then(showHashes);
 }
 
 document.getElementById('theme').onclick = () => {
