@@ -1,7 +1,7 @@
 // ═══ الاشتراكات: التحقق من كود التفعيل الموقّع على الجهاز نفسه، وتحديد الميزات المسموحة ═══
 // بلا DOM وبلا خادم. المالك يصدر لكل زبون كوداً موقّعاً (باقة + ميزات إضافية أو محذوفة + تاريخ انتهاء)،
 // والبرنامج يتحقق من التوقيع بالمفتاح العام ثم يفتح للزبون ما اشتراه فقط. بيانات الزبون لا تُقفل أبداً.
-import { ymd, daysBetween, isDate } from './core.js';
+import { ymd, daysBetween, isDate, addDays } from './core.js';
 import { CONFIG, FEATURES, PLANS, planFeatures, featureById } from './plans.js';
 import { PUBLIC_KEYS } from './license-key.js';
 
@@ -70,7 +70,9 @@ export function cleanPayload(o) {
   const dev = str(o.d, 20);
   if (dev && !/^[A-Z0-9-]{4,20}$/.test(dev)) return null;
   const list = (a) => (Array.isArray(a) ? [...new Set(a.filter((x) => typeof x === 'string' && /^[a-z][a-z0-9-]{0,24}$/.test(x)))].slice(0, 60) : []);
-  return { v: 1, id, k: str(o.k, 16), c: str(o.c, 80), p: str(o.p, 20), a: list(o.a), r: list(o.r), i: issued, e: exp, d: dev };
+  // n = عدد الفواتير في كود «نسخة عرض» (يغيب من كود الاشتراك العادي فلا يتغير شكله)
+  const n = Number.isInteger(o.n) && o.n > 0 && o.n <= 999 ? o.n : 0;
+  return { v: 1, id, k: str(o.k, 16), c: str(o.c, 80), p: str(o.p, 20), a: list(o.a), r: list(o.r), i: issued, e: exp, d: dev, ...(n ? { n } : {}) };
 }
 
 // ─── التحقق من التوقيع ───
@@ -96,12 +98,13 @@ export function resolveFeatures(payload) {
   return new Set([...planFeatures(payload.p), ...(payload.a || [])].filter((id) => featureById(id) && !removed.has(id)));
 }
 
-// الحالة بتاريخ معيّن. e = آخر يوم صالح. بعده مهلة بالأيام تبقى فيها الميزات ثم تُقفل
+// الحالة بتاريخ معيّن. e = آخر يوم صالح. بعده مهلة بالأيام تبقى فيها الميزات ثم تُقفل (ونسخة العرض بلا مهلة)
 export function entitlementOf(payload, today, graceDays = CONFIG.graceDays) {
   const free = new Set(planFeatures('free'));
   const freeName = PLANS.free ? PLANS.free.name : 'المجانية';
   if (!payload) return { status: 'free', plan: 'free', planName: freeName, features: free, customer: '', id: '', exp: '', issued: '', daysLeft: null, graceLeft: 0 };
   const left = payload.e ? daysBetween(today, payload.e) : null;
+  if (payload.n) graceDays = 0;
   const status = left == null ? 'lifetime' : left >= 0 ? 'active' : -left <= graceDays ? 'grace' : 'expired';
   return {
     status, plan: payload.p || 'custom', planName: (PLANS[payload.p] && PLANS[payload.p].name) || 'مخصّصة',
@@ -181,7 +184,74 @@ export function setPreview(on) { if (on) store().set(LS_PREVIEW, '1'); else stor
 export const previewing = () => store().get(LS_PREVIEW) === '1';
 // الاشتراكات تُطبَّق إذا فعّلها المالك للجميع، أو على هذا الجهاز فقط للمعاينة
 export const enforcing = () => !!CONFIG.enforce || previewing();
-export const has = (id) => !enforcing() || entitlement().features.has(id);
+
+// ─── نسخة العرض: عدد فواتير ومدة محدودان للتجربة، وكود الاشتراك يحوّلها لاشتراك كامل بنفس البيانات ───
+// المصدر الأول: كود عرض يصدره المالك (n = عدد الفواتير، وتاريخ الانتهاء = المدة) ويعمل دائماً.
+// المصدر الثاني: نسخة بلا كود اشتراك حين يفعّل المالك CONFIG.demoPublic (أو على جهازه فقط للمعاينة).
+// العدّاد محفوظ على الجهاز بجانب الكود، فلا يُصفَّر بحذف بيانات المحاسبة ولا بحذف الفواتير.
+// كل شيء يعمل على جهاز الزبون، فهذه حدود للردع وليست حماية مطلقة.
+export const DEMO_TYPES = ['sale', 'purchase']; // الفواتير التي تُحسب (المبيعات بما فيها الكاشير، والمشتريات)
+const LS_DEMO_USED = 'ahsebha-demo-used';
+const LS_DEMO_START = 'ahsebha-demo-start';
+const LS_DEMO_PREVIEW = 'ahsebha-demo-preview';
+const TRIAL = 'trial';
+
+export function setDemoPreview(on) { if (on) store().set(LS_DEMO_PREVIEW, '1'); else store().del(LS_DEMO_PREVIEW); }
+export const demoPreviewing = () => store().get(LS_DEMO_PREVIEW) === '1';
+// هل النسخ التي بلا كود اشتراك تعمل كنسخة عرض؟ (للجميع، أو على هذا الجهاز للمعاينة)
+export const trialOn = () => (!!CONFIG.demoPublic || demoPreviewing()) && CONFIG.demoInvoices > 0;
+
+const readUsed = () => { try { const o = JSON.parse(store().get(LS_DEMO_USED) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
+const usedOf = (key) => { const n = Math.floor(Number(readUsed()[key])); return n > 0 ? n : 0; };
+export const invoicesText = (n) => (n === 1 ? 'فاتورة واحدة' : n === 2 ? 'فاتورتان' : n <= 10 ? `${n} فواتير` : `${n} فاتورة`);
+
+// حالة نسخة العرض الآن، أو null إن لم تكن هذه النسخة نسخة عرض.
+// الاشتراك الفعّال (والمهلة) ليس عرضاً. المنتهي يعود لنسخة العرض إن كانت مفعّلة للجميع.
+export function demo(today = clock()) {
+  const p = current && current.payload;
+  let source, key, limit, exp;
+  if (p && p.n) { source = 'code'; key = p.id; limit = p.n; exp = p.e; }
+  else if ((!p || entitlementOf(p, today).status === 'expired') && trialOn()) {
+    source = 'trial'; key = TRIAL; limit = CONFIG.demoInvoices;
+    let start = store().get(LS_DEMO_START);
+    if (!isDate(start)) { start = today; store().set(LS_DEMO_START, start); }
+    exp = CONFIG.demoDays > 0 ? addDays(start, CONFIG.demoDays) : '';
+  } else return null;
+  const used = usedOf(key);
+  const left = Math.max(0, limit - used);
+  const daysLeft = exp ? daysBetween(today, exp) : null;
+  const expired = daysLeft != null && daysLeft < 0;
+  return { source, key, limit, used, left, exp, daysLeft, expired, blocked: expired || left === 0, reason: expired ? 'expired' : left === 0 ? 'limit' : '' };
+}
+
+// قبل إنشاء فاتورة جديدة: يرجّع حالة العرض إن كان ممنوعاً، وإلا null
+export function docGate(type) {
+  if (!DEMO_TYPES.includes(type)) return null;
+  const d = demo();
+  return d && d.blocked ? d : null;
+}
+// بعد إنشاء فاتورة جديدة: يزيد العدّاد (الحذف لا يعيد الحصة)
+export function docCreated(type) {
+  if (!DEMO_TYPES.includes(type)) return;
+  const d = demo();
+  if (!d) return;
+  const o = readUsed();
+  o[d.key] = usedOf(d.key) + 1;
+  store().set(LS_DEMO_USED, JSON.stringify(o));
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('acc:demo'));
+}
+export function demoError(d) {
+  const e = new Error(d.reason === 'expired'
+    ? 'انتهت مدة نسخة العرض. فعّل كود الاشتراك لتكمل إنشاء الفواتير. بياناتك كلها محفوظة.'
+    : `وصلت لحد نسخة العرض (${invoicesText(d.limit)}). فعّل كود الاشتراك لتكمل إنشاء الفواتير. بياناتك كلها محفوظة.`);
+  e.code = 'DEMO_LIMIT';
+  e.demo = d;
+  return e;
+}
+
+// في أثناء تجربة النسخة المفتوحة للجميع تُفتح كل الميزات لتجربتها، وبعد انتهائها تعود حسب الباقة
+const trialOpen = () => { const d = demo(); return !!d && d.source === 'trial' && !d.blocked; };
+export const has = (id) => !enforcing() || entitlement().features.has(id) || trialOpen();
 
 // أي ميزة تحكم هذا الرابط؟ (null = أساسي لا يُقفل)
 const bySeg = () => { const m = new Map(); for (const f of FEATURES) for (const s of f.segs) m.set(s, f.id); return m; };

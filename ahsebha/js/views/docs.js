@@ -11,6 +11,8 @@ import {
 import { repeatDialog } from './recurring.js';
 import { scanForPurchase, takeDraft, receiptCheck } from './scan.js';
 import { bindFiles, bindDocFiles } from './attach.js';
+import { handleDemoError } from './subscription.js';
+import { demo as demoState } from '../license.js';
 
 const CFG = {
   sale: { icon: '🧾', kind: 'customer', priceKey: 'price', newLabel: 'فاتورة جديدة', payLabel: 'طريقة الدفع', credit: 'آجل على العميل', paidLabel: 'المبلغ المدفوع' },
@@ -493,7 +495,8 @@ export function form(type, { root, params, query }) {
     }
     const errs = validateDoc(db, doc);
     if (!showErrors(root, errs)) { toast('راجع الحقول المظللة باللون الأحمر', 'err'); return; }
-    store.saveDoc(doc);
+    // نسخة العرض: إن وصلت حدها تظهر نافذة التفعيل وتبقى الفاتورة كما كتبها المستخدم على الشاشة
+    try { store.saveDoc(doc); } catch (e) { if (handleDemoError(e)) return; throw e; }
     if (doc.fromQuote) store.patchDoc(doc.fromQuote, { convertedTo: doc.id });
     guard.dirty = false;
     toast('تم الحفظ ✓');
@@ -592,6 +595,7 @@ export function show(type, { root, params, query }) {
     const lines = [`${T.name} رقم ${no}`, `التاريخ: ${fmtDate(d.date)}`, party ? `${kindName(C.kind)}: ${party.name}` : '', `الإجمالي: ${moneyText(t.total)}`];
     if (st && st.due > 0) lines.push(`المتبقي: ${moneyText(st.due)}`);
     lines.push('', `مع تحيات ${s.name || ''}`);
+    if (demoState()) lines.push('(نسخة تجريبية من برنامج احسبها)'); // كما على الورقة المطبوعة
     window.open(waLink(party && party.phone, lines.filter((x) => x !== '').join('\n')), '_blank', 'noopener');
   };
   const del = $('[data-del]', root);

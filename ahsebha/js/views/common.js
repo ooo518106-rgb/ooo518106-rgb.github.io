@@ -6,6 +6,7 @@ import {
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
 import { go, withQuery, docHref as docHrefOf } from '../nav.js';
+import { demo as demoState } from '../license.js';
 
 export const today = () => ymd(new Date());
 export const S = () => store.getDb().settings;
@@ -287,7 +288,10 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const cashier = d.pos && d.by ? store.findUser(d.by) : null;
 
   const note = [d.notes, isSale ? s.invoiceNote : ''].filter(Boolean).join('\n');
-  return html`<div class="paper ${small ? 'receipt' : ''} ${bi ? 'bi' : ''}">
+  // نسخة العرض: علامة مائية وتذييل يمنعان استعمال الفاتورة فعلياً (تظهر على الشاشة وفي الطباعة)
+  const dm = demoState();
+  return html`<div class="paper ${small ? 'receipt' : ''} ${bi ? 'bi' : ''} ${dm ? 'is-demo' : ''}">
+    ${dm ? html`<div class="demo-mark" aria-hidden="true"><span>نسخة تجريبية</span></div>` : ''}
     <div class="pp-head">${coBlock(s, bi)}<div class="pp-title"><h1>${title}</h1><div class="en">${en}</div></div></div>
     <div class="pp-meta">
       ${meta(L('الرقم', 'No.'), html`<span dir="ltr">${d.no ? docNo(d, s) : 'مسودة'}</span>`)}
@@ -315,7 +319,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
       </div>
       <div class="pp-words">${tafqeet(T.total, s.currency)}</div></div>
     </div>
-    <div class="pp-foot"><span>${s.name || ''}</span><span>${small ? (bi ? 'شكراً لزيارتكم · Thank you' : 'شكراً لزيارتكم') : 'صادر من برنامج محاسبة احسبها'}</span></div>
+    <div class="pp-foot"><span>${s.name || ''}</span><span>${dm ? 'نسخة تجريبية من برنامج احسبها — للتجربة فقط' : small ? (bi ? 'شكراً لزيارتكم · Thank you' : 'شكراً لزيارتكم') : 'صادر من برنامج محاسبة احسبها'}</span></div>
   </div>`;
 }
 

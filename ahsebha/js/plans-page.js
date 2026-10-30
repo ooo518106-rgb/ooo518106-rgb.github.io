@@ -1,6 +1,6 @@
 // ═══ صفحة الباقات والاشتراكات: كل محتواها من js/plans.js، فتعديل الأسعار والميزات هناك يكفي ═══
 import { CONFIG, FEATURES, PLANS, planFeatures } from './plans.js';
-import { contactLink } from './license.js';
+import { contactLink, trialOn, invoicesText } from './license.js';
 import { html } from './ui.js';
 
 const root = document.getElementById('sales');
@@ -31,6 +31,10 @@ const FAQ = [
   ['هل يناسب بلدي؟', 'يدعم السعودية والإمارات والأردن والكويت وقطر والبحرين وعُمان ومصر والعراق، بعملة وضريبة كل بلد، ومصطلحات مناسبة لكل منها.'],
   ['ما الفرق بين الباقات؟', 'الباقة المجانية للبدء بالأساسيات. الباقات المدفوعة تفتح ميزات أكثر مثل الكاشير والمشتريات والرواتب. يمكنك الاطلاع على الجدول أعلاه، وإن احتجت ميزات بعينها فنجهّز لك اشتراكاً مخصصاً.'],
 ];
+
+// نسخة العرض تظهر للزوار حين يفعّلها المالك، ولجهاز المالك وحده في المعاينة
+const demoText = () => `${invoicesText(CONFIG.demoInvoices)}${CONFIG.demoDays > 0 ? ` خلال ${CONFIG.demoDays} يوماً` : ''}`;
+const demoFaq = () => ['ما هي نسخة العرض؟', `نسخة تجريبية مجانية: تنزّل التطبيق من صفحة التنزيلات وتجرّب كل ميزاته بـ ${demoText()}، وتحمل فواتيرها علامة «نسخة تجريبية». عندما يعجبك نرسل لك كود الاشتراك، تلصقه في «اشتراكي» فيصير اشتراكاً كاملاً على نفس التطبيق وبياناتك كما هي.`];
 
 function priceBlock(p) {
   if (p.id === 'free') return html`<div class="plan-price"><b>مجاناً</b><span>للأبد</span></div>`;
@@ -75,6 +79,7 @@ function previewNote() {
   if (!CONFIG.whatsapp) todo.push('رقم واتساب البيع غير مضبوط');
   for (const p of paid) if (!hasPrice(p)) todo.push(`سعر باقة «${p.name}» غير محدد`);
   if (!CONFIG.enforce) todo.push('الاشتراكات غير مفعّلة داخل البرنامج بعد');
+  if (!CONFIG.demoPublic) todo.push('نسخة العرض غير مفعّلة للجميع بعد' + (trialOn() ? ' (تظهر لك لأنك شغّلتها على هذا الجهاز)' : ''));
   return html`<div class="note note-warn" data-preview-note>🚧 <b>معاينة:</b> هذه الصفحة غير معلنة بعد ولا تظهر في جوجل ولا من داخل البرنامج. هكذا ستبدو للزوار عند النشر.${todo.length ? html`<br>المتبقي قبل النشر: ${todo.join('، ')}.` : ''}</div>`;
 }
 
@@ -85,7 +90,7 @@ function render() {
     <section class="hero-acc sales-hero"><div class="ic">📒</div>
       <h1>برنامج محاسبة عربي بسيط لمحلك أو شركتك</h1>
       <p>فواتير ضريبية، كاشير بالباركود، مخزون، مشتريات، رواتب وتقارير مالية كاملة. يعمل من المتصفح، وبياناتك تبقى على جهازك.</p>
-      <div class="actions" style="justify-content:center"><a class="btn btn-primary" href="./">🧪 جرّب مجاناً ببيانات تجريبية</a><a class="btn btn-ghost" href="#plans">شاهد الباقات</a></div>
+      <div class="actions" style="justify-content:center"><a class="btn btn-primary" href="./">🧪 جرّب مجاناً ببيانات تجريبية</a>${trialOn() ? html`<a class="btn btn-ghost" href="download.html#demo" data-demo-download>⬇️ حمّل نسخة العرض</a>` : ''}<a class="btn btn-ghost" href="#plans">شاهد الباقات</a></div>
       <ul class="trust"><li>🔒 بياناتك على جهازك فقط</li><li>📴 يعمل بدون إنترنت</li><li>🧾 فواتير ضريبية بالعربي والإنجليزي</li><li>🌍 9 دول عربية</li></ul></section>
 
     <section id="plans" class="sales-sec"><div class="sec-head"><h2>اختر باقتك</h2><p class="muted">ابدأ مجاناً، وافتح المزيد عندما تحتاجه. تغيير الباقة أو إضافة ميزة في أي وقت.</p>
@@ -96,12 +101,12 @@ function render() {
       <div class="card" style="margin-top:14px"><div class="card-h"><h3>✅ تشمله كل الباقات</h3></div><ul class="base-list">${BASE.map((b) => html`<li>${b}</li>`)}</ul></div></section>
 
     <section class="sales-sec"><div class="sec-head"><h2>كيف تبدأ؟</h2></div>
-      <ol class="steps"><li><b>جرّب مجاناً</b><span>افتح البرنامج وجرّبه ببيانات تجريبية بدون تسجيل.</span></li>
+      <ol class="steps"><li><b>جرّب مجاناً</b><span>${trialOn() ? html`حمّل <a href="download.html#demo">نسخة العرض</a> وجرّبها بـ ${demoText()}، أو افتح البرنامج ببيانات تجريبية بدون تسجيل.` : 'افتح البرنامج وجرّبه ببيانات تجريبية بدون تسجيل.'}</span></li>
         <li><b>اطلب باقتك</b><span>اضغط «اطلب الاشتراك» لنتواصل معك على واتساب ونتفق على الدفع.</span></li>
         <li><b>فعّل الكود</b><span>تصلك رسالة فيها رابط التفعيل. اضغطه فتعمل ميزاتك فوراً.</span></li></ol></section>
 
     <section id="faq" class="sales-sec"><div class="sec-head"><h2>أسئلة شائعة</h2></div>
-      <div class="faq">${FAQ.map(([q, a]) => html`<details><summary>${q}</summary><p>${a}</p></details>`)}</div></section>
+      <div class="faq">${(trialOn() ? [demoFaq(), ...FAQ] : FAQ).map(([q, a]) => html`<details><summary>${q}</summary><p>${a}</p></details>`)}</div></section>
 
     <section class="sales-sec final-cta"><h2>جاهز تبدأ؟</h2><p class="muted">جرّب البرنامج الآن بدون تسجيل، واشترك عندما تحتاج المزيد.</p>
       <div class="actions" style="justify-content:center"><a class="btn btn-primary" href="./">افتح البرنامج</a><a class="btn btn-ghost" href="#plans">الباقات</a></div></section>`);

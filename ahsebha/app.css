@@ -611,6 +611,23 @@ html[data-role="cashier"] .page-head [data-del], html[data-role="cashier"] .page
 .lock-page .actions { justify-content: center; }
 .sub-card.sub-ok { border-color: var(--ok-fg); }
 .sub-card.sub-warn { border-color: var(--warn-fg); }
+.sub-card.sub-demo { border-color: var(--info-fg); }
+
+/* ─── نسخة العرض: الشريط، عدّاد الفواتير، والعلامة المائية على الفاتورة ─── */
+.demo-bar { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px 12px; padding: 7px 16px; background: var(--info-bg); color: var(--info-fg); border-bottom: 1px solid var(--border); font-size: .88rem; font-weight: 600; text-align: center; }
+.demo-bar[hidden] { display: none; }
+.demo-bar.is-low { background: var(--warn-bg); color: var(--warn-fg); }
+.demo-bar.is-blocked { background: var(--bad-bg); color: var(--bad-fg); }
+.demo-bar .btn-ghost { border-color: currentColor; color: inherit; }
+.demo-meter { height: 10px; border-radius: 99px; background: var(--soft); border: 1px solid var(--border); overflow: hidden; margin-top: 10px; }
+.demo-meter span { display: block; height: 100%; background: var(--primary); border-radius: 99px; }
+.sub-warn .demo-meter span { background: var(--warn-fg); }
+.paper.is-demo { position: relative; }
+.demo-mark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 1; overflow: hidden; border-radius: inherit; }
+.demo-mark span { transform: rotate(-24deg); font-size: 72px; font-weight: 900; letter-spacing: .04em; white-space: nowrap; color: rgba(220, 38, 38, .15); border: 6px solid rgba(220, 38, 38, .15); border-radius: 16px; padding: 4px 28px; }
+.paper.receipt .demo-mark span { font-size: 30px; border-width: 3px; padding: 2px 12px; }
+@media (max-width: 760px) { .demo-mark span { font-size: 46px; } .paper.receipt .demo-mark span { font-size: 26px; } }
+@media print { .demo-mark span { color: rgba(220, 38, 38, .22); border-color: rgba(220, 38, 38, .22); -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 .feat-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 8px 14px; }
 .feat-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--soft); }
 .feat-row.is-off { opacity: .75; }

@@ -4,7 +4,7 @@ import * as store from '../store.js';
 import * as lic from '../license.js';
 import { CONFIG, FEATURES, PLANS, featureById, planFeatures } from '../plans.js';
 import { html, toast, confirmBox, modal, fmtDate, $ } from '../ui.js';
-import { setTitle, go } from '../nav.js';
+import { setTitle, go, SEG } from '../nav.js';
 import { head, countAr } from './common.js';
 
 const DAYS = ['يوم', 'يومان', 'أيام', 'يوماً'];
@@ -23,13 +23,67 @@ function actions(what = 'الاشتراك', { extra = '' } = {}) {
 
 // ─── شريط تنبيه على الرئيسية: فقط عند اقتراب الانتهاء أو انتهائه ───
 export function banner() {
-  if (!lic.enforcing() || !lic.license()) return '';
+  if (!lic.enforcing() || !lic.license() || lic.demo()) return '';
   const e = lic.entitlement();
   const renew = html` <a href="#/subscription">جدّد من هنا</a>`;
   if (e.status === 'active' && e.daysLeft <= 7) return html`<p class="note note-warn" style="margin-bottom:14px">⏳ اشتراكك (${e.planName}) ينتهي ${e.daysLeft === 0 ? 'اليوم' : `بعد ${daysText(e.daysLeft)}`}. جدّده حتى لا تُقفل الميزات المدفوعة.${renew}</p>`;
   if (e.status === 'grace') return html`<p class="note note-warn" style="margin-bottom:14px">⚠️ انتهى اشتراكك (${e.planName}) وما زالت ميزاته تعمل ${daysText(e.graceLeft)} إضافية ثم تُقفل. بياناتك محفوظة في كل الأحوال.${renew}</p>`;
   if (e.status === 'expired') return html`<p class="note note-warn" style="margin-bottom:14px">🔒 انتهى اشتراكك وعاد البرنامج للباقة المجانية. بياناتك كلها محفوظة وتستطيع تنزيل نسخة احتياطية في أي وقت.${renew}</p>`;
   return '';
+}
+
+// ─── نسخة العرض: شريط أعلى الصفحات، وصفحة ونافذة عند الوصول للحد ───
+const demoTime = (d) => (d.daysLeft == null ? '' : d.expired ? 'انتهت مدتها' : d.daysLeft === 0 ? 'تنتهي اليوم' : `تنتهي بعد ${daysText(d.daysLeft)}`);
+// شرح الحالة بجملة: ماذا بقي أو لماذا توقفت
+const demoWhy = (d) => (d.reason === 'expired' ? 'انتهت مدة نسخة العرض.' : d.reason === 'limit' ? `وصلت لحد نسخة العرض: ${lic.invoicesText(d.limit)}.` : `باقي ${lic.invoicesText(d.left)} من ${d.limit}.`);
+
+export function demoBar(el) {
+  if (!el) return;
+  const d = lic.demo();
+  if (!d) { el.hidden = true; el.innerHTML = ''; return; }
+  const low = d.blocked || d.left <= 2 || (d.daysLeft != null && d.daysLeft <= 3);
+  el.hidden = false;
+  el.className = `demo-bar${d.blocked ? ' is-blocked' : low ? ' is-low' : ''}`;
+  el.innerHTML = String(html`<span class="demo-txt"><b>🧪 نسخة عرض</b> · ${d.blocked ? demoWhy(d) : html`باقي <b>${d.left}</b> من ${lic.invoicesText(d.limit)}${d.daysLeft != null ? html` · ${demoTime(d)}` : ''}`}</span>
+    <a class="btn btn-sm ${d.blocked ? 'btn-primary' : 'btn-ghost'}" href="#/subscription" data-demo-activate>🔑 فعّل اشتراكك</a>`);
+}
+
+// الصفحات التي تنشئ فاتورة: تُستبدل بصفحة الحد عندما تنتهي نسخة العرض
+const DEMO_ROUTES = new Set(['pos', ...lic.DEMO_TYPES.map((t) => `${SEG[t]}/new`)]);
+export function demoBlocksRoute(path) {
+  const d = lic.demo();
+  return !!d && d.blocked && DEMO_ROUTES.has(String(path || '').split('?')[0].split('/').filter(Boolean).join('/'));
+}
+
+// أزرار الصفحة والنافذة عند الوصول للحد
+function demoActions(extra = '') {
+  const wa = lic.contactLink(wantText('تفعيل الاشتراك بعد تجربة النسخة'));
+  return html`${wa ? html`<a class="btn btn-primary" href="${wa}" target="_blank" rel="noopener" data-demo-wa>💬 اطلب كود الاشتراك</a>` : ''}
+    <a class="btn ${wa ? 'btn-ghost' : 'btn-primary'}" href="#/subscription" data-demo-code${extra}>🔑 عندي كود تفعيل</a>`;
+}
+const demoSafe = html`<p class="muted small" style="margin-top:10px">بياناتك كلها محفوظة: تستطيع تصفحها وطباعتها وتنزيل نسخة احتياطية من الإعدادات. وعند التفعيل ترجع الفواتير وتبقى بياناتك كما هي.</p>`;
+const demoNoWa = () => (lic.contactLink('x') ? '' : html`<p class="muted small" style="margin-top:10px">لتفعيل الاشتراك تواصل مع من زوّدك بالبرنامج ليرسل لك كود التفعيل.</p>`);
+
+export function demoLimitPage(root) {
+  const d = lic.demo();
+  setTitle('نسخة العرض');
+  root.innerHTML = String(html`<div class="empty lock-page" data-demo-limit><div class="empty-ic">🧪</div>
+    <h3>${d && d.reason === 'expired' ? 'انتهت مدة نسخة العرض' : 'وصلت لحد فواتير نسخة العرض'}</h3>
+    <p>${d ? demoWhy(d) : ''} عجبك البرنامج؟ اطلب كود الاشتراك وفعّله هنا لتكمل عملك بنفس بياناتك.</p>
+    <div class="actions" style="justify-content:center;margin-top:14px">${demoActions()}<a class="btn btn-ghost" href="#/">الرئيسية</a></div>
+    ${demoNoWa()}${demoSafe}</div>`);
+}
+
+// نافذة عند محاولة الحفظ بعد الحد (أو عند وصول الحد أثناء العمل): تُرجع true إن كان الخطأ خطأ نسخة العرض
+export function handleDemoError(e) {
+  if (!e || e.code !== 'DEMO_LIMIT') return false;
+  modal({
+    title: '🧪 نسخة العرض',
+    body: html`<p class="dlg-msg">${demoWhy(e.demo)} عجبك البرنامج؟ اطلب كود الاشتراك وفعّله لتكمل عملك بنفس بياناتك.</p>
+      <div class="dlg-actions">${demoActions(' data-no')}<button type="button" class="btn btn-ghost" data-no>إغلاق</button></div>${demoNoWa()}${demoSafe}`,
+    onMount: (dlg, done) => dlg.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', () => done(null))),
+  });
+  return true;
 }
 
 // ─── نافذة: هذه الميزة ليست ضمن باقتك ───
@@ -66,13 +120,16 @@ async function tryActivate(input) {
   if (bad) return { ok: false, reason: bad };
   const cur = lic.license();
   const e = lic.entitlement();
-  if (cur && cur.payload.id !== v.payload.id && e.status !== 'expired') {
-    const ok = await confirmBox(`عندك اشتراك مفعّل (${e.planName}${e.exp ? ' حتى ' + fmtDate(e.exp) : ''}). هل تريد استبداله بالكود الجديد؟`, { ok: 'استبدال', title: 'استبدال الاشتراك' });
+  // نسخة العرض ليست اشتراكاً: يُستبدل بها أو بغيرها بلا سؤال، والسؤال فقط قبل استبدال اشتراك حقيقي فعّال
+  if (cur && cur.payload.id !== v.payload.id && !cur.payload.n && e.status !== 'expired') {
+    const what = v.payload.n ? `الكود الجديد نسخة عرض محدودة (${lic.invoicesText(v.payload.n)})` : 'الكود الجديد بديل عنه';
+    const ok = await confirmBox(`عندك اشتراك مفعّل (${e.planName}${e.exp ? ' حتى ' + fmtDate(e.exp) : ''}). ${what}. هل تريد استبداله؟`, { ok: 'استبدال', title: 'استبدال الاشتراك' });
     if (!ok) return { ok: false, reason: 'cancelled' };
   }
   return lic.activate(v.code);
 }
 const refreshShell = () => window.dispatchEvent(new Event('acc:shell'));
+const activatedText = (r) => (r.payload.n ? `تم تفعيل نسخة العرض ✓ (${lic.invoicesText(r.payload.n)})` : `تم تفعيل اشتراكك: ${r.entitlement.planName} ✓`);
 
 // ─── رابط التفعيل: #/activate?k=الكود (يعمل حتى قبل إنشاء المنشأة) ───
 export async function activate({ root, query }) {
@@ -81,7 +138,7 @@ export async function activate({ root, query }) {
   const r = await tryActivate(query.k || '');
   if (r.ok) {
     refreshShell();
-    toast(`تم تفعيل اشتراكك: ${r.entitlement.planName} ✓`);
+    toast(activatedText(r));
     go(store.getDb() ? '#/subscription' : '#/welcome');
     return;
   }
@@ -118,17 +175,32 @@ export function view({ root }) {
       ${warn ? html`<div class="actions" style="margin-top:12px">${actions('تجديد الاشتراك')}</div>` : ''}</div>`;
   };
 
+  // نسخة العرض: بطاقة بالمتبقي من الفواتير والمدة تحلّ مكان بطاقة الباقة (والاشتراك الحقيقي المنتهي يبقى ظاهراً تحتها)
+  const demoCard = (d) => {
+    const pct = Math.min(100, Math.round((d.used / d.limit) * 100));
+    const prob = problem ? html`<p class="note note-warn" style="margin-bottom:12px">⚠️ الكود المحفوظ على هذا الجهاز لا يعمل: ${lic.REASONS[problem] || ''}</p>` : '';
+    return html`<div class="card sub-card ${d.blocked ? 'sub-warn' : 'sub-demo'}" data-demo-card>${prob}
+      <div class="card-h"><h3>🧪 ${d.blocked ? 'انتهت نسخة العرض' : 'أنت تستعمل نسخة العرض'}</h3>
+        ${d.source === 'code' ? html`<button type="button" class="btn btn-ghost btn-sm" data-clear>إلغاء التفعيل على هذا الجهاز</button>` : ''}</div>
+      <p class="today-text">${demoWhy(d)}${d.exp ? html`<br><span class="muted small">${d.expired ? 'انتهت في' : 'تنتهي في'} ${fmtDate(d.exp)}${d.expired ? '' : d.daysLeft === 0 ? ' (آخر يوم اليوم)' : ` (باقي ${daysText(d.daysLeft)})`}</span>` : ''}</p>
+      <div class="demo-meter" role="progressbar" aria-valuemin="0" aria-valuemax="${d.limit}" aria-valuenow="${d.used}" aria-label="الفواتير المستعملة"><span style="width:${pct}%"></span></div>
+      <p class="muted small" style="margin-top:6px">استعملت ${d.used} من ${d.limit}. كل الميزات مفتوحة للتجربة، والفواتير تحمل علامة «نسخة تجريبية». عند التفعيل ترتفع هذه الحدود وتبقى بياناتك كما هي.</p>
+      <div class="actions" style="margin-top:12px">${actions('تفعيل الاشتراك بعد تجربة النسخة')}</div></div>`;
+  };
+  const demoNow = lic.demo();
+  const top = () => (demoNow ? html`${demoCard(demoNow)}${e.status === 'expired' ? statusCard() : ''}` : statusCard());
+
   const rows = FEATURES.map((f) => {
-    const has = e.features.has(f.id) || !on;
+    const has = lic.has(f.id);
     const seg = f.segs[0];
     return html`<li class="feat-row ${has ? 'is-on' : 'is-off'}"><span class="feat-ic" aria-hidden="true">${f.icon}</span>
       <div><b>${f.name}</b><div class="muted small">${f.desc}</div></div>
       ${has ? html`<span class="badge badge-ok">متاحة</span>` : seg ? html`<a class="badge badge-muted" href="#/${seg}">🔒 مقفلة</a>` : html`<span class="badge badge-muted">🔒 مقفلة</span>`}</li>`;
   });
-  const open = FEATURES.filter((f) => e.features.has(f.id) || !on).length;
+  const open = FEATURES.filter((f) => lic.has(f.id)).length;
 
   root.innerHTML = String(html`${head('اشتراكي', { sub: 'باقتك وميزاتك وتفعيل كود الاشتراك' })}
-    ${statusCard()}
+    ${top()}
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>🔑 تفعيل كود الاشتراك</h3></div>
       <form data-form novalidate class="stack">
         <label class="fld"><span class="fld-l">الصق الكود أو رابط التفعيل الذي وصلك</span>
@@ -149,7 +221,7 @@ export function view({ root }) {
     ev.preventDefault();
     err.hidden = true;
     const r = await tryActivate(form.code.value);
-    if (r.ok) { refreshShell(); toast(`تم تفعيل اشتراكك: ${r.entitlement.planName} ✓`); view({ root }); return; }
+    if (r.ok) { refreshShell(); toast(activatedText(r)); view({ root }); return; }
     if (r.reason === 'cancelled') return;
     err.textContent = lic.REASONS[r.reason] || 'تعذّر تفعيل الكود.';
     err.hidden = false;
