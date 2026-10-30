@@ -24,4 +24,6 @@ Changes that do not reach users (CI only, tests, docs) do not need an entry.
 ## Good to know
 
 - Subscriptions are dormant until the owner decides what is free and what is paid: `enforce` and `published` in `ahsebha/js/plans.js` are `false`, and the owner's public key line is not in `js/license-key.js` yet. Do not switch them on without being asked.
+- The desktop installer ships a copy of `ahsebha/` (`extraResources` in `desktop/package.json`; `store/`, `test/`, `*.md` and `package.json` are left out). `desktop/offline-site.js` serves it only when the network fails, after the last copy saved on the device, so the app opens with no internet from the very first launch while online it always shows the live site. A new desktop release refreshes the shipped copy. Anything the program needs at run time must live inside `ahsebha/`.
+- The build checks that behaviour on all three systems (`ci/check.js` asserts on the smoke result). Use `--proxy-server=127.0.0.1:9` with `--smoke-no-network` to cut the connection, and `--disable-http-cache` so the browser's cache cannot hide the app's own copies.
 - The owner is not technical and reads Arabic: keep reports short, simple and in Arabic.
