@@ -15,17 +15,25 @@ export function list(kind, { root, query }) {
   setTitle(W.plural);
   const db = store.getDb();
   const B = store.getBooks();
-  const all = db.parties.filter((p) => p.kind === kind).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  const AR = new Intl.Collator('ar'); // مرصّف واحد: localeCompare ينشئ مرصّفاً في كل مقارنة وهذا بطيء مع آلاف العملاء
+  const all = db.parties.filter((p) => p.kind === kind).sort((a, b) => AR.compare(a.name, b.name));
   const state = { q: query.q || '', only: query.only || '' };
-  const overdueOf = (p) => (B.openItems.get(p.id) || []).filter((it) => it.side === 'c').reduce((t, it) => {
-    const d = docOf(it.doc, B);
-    return d && d.dueDate && d.dueDate < today() ? t + it.open : t;
-  }, 0);
+  let limit = 300;
+  const lateOf = new Map(); // المتأخر لكل عميل يُحسب مرة واحدة لا مع كل حرف يُكتب بالبحث
+  const overdueOf = (p) => {
+    if (!lateOf.has(p.id)) {
+      lateOf.set(p.id, (B.openItems.get(p.id) || []).filter((it) => it.side === 'c').reduce((t, it) => {
+        const d = docOf(it.doc, B);
+        return d && d.dueDate && d.dueDate < today() ? t + it.open : t;
+      }, 0));
+    }
+    return lateOf.get(p.id);
+  };
 
   root.innerHTML = String(html`
     ${head(W.plural, { sub: `${all.length} ${W.one}`, actions: html`<a class="btn btn-primary" href="#/${W.seg}/new">➕ ${W.one} جديد</a>` })}
     <div class="toolbar"><input class="inp grow" type="search" data-q placeholder="بحث بالاسم أو الجوال أو الرقم الضريبي" value="${state.q}">
-      <select class="inp" data-only><option value="">الكل</option><option value="bal">عليهم رصيد</option><option value="late">متأخرون</option></select>
+      <select class="inp" data-only aria-label="تصفية"><option value="">الكل</option><option value="bal">عليهم رصيد</option><option value="late">متأخرون</option></select>
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button></div>
     <div data-out></div>`);
   $('[data-only]', root).value = state.only;
@@ -43,16 +51,19 @@ export function list(kind, { root, query }) {
     const total = rows.reduce((t, r) => t + r.bal, 0);
     out.innerHTML = String(html`<div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>إجمالي الأرصدة: <b>${money(total, { sym: true })}</b></span></div>
       ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الاسم</th><th>الجوال</th><th class="hide-sm">الرقم الضريبي</th><th class="num">الرصيد</th><th class="num hide-sm">متأخر</th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr data-href="#/${W.seg}/${r.p.id}"><td><b>${r.p.name}</b></td><td dir="ltr" class="nowrap">${r.p.phone || ''}</td><td class="hide-sm" dir="ltr">${r.p.vatNo || ''}</td>
-        <td class="num">${money(r.bal)}</td><td class="num hide-sm">${r.late ? html`<span class="neg">${money(r.late)}</span>` : '—'}</td></tr>`)}</tbody></table></div>`
+      <tbody>${rows.slice(0, limit).map((r) => html`<tr data-href="#/${W.seg}/${r.p.id}"><td><b>${r.p.name}</b></td><td dir="ltr" class="nowrap">${r.p.phone || ''}</td><td class="hide-sm" dir="ltr">${r.p.vatNo || ''}</td>
+        <td class="num">${money(r.bal)}</td><td class="num hide-sm">${r.late ? html`<span class="neg">${money(r.late)}</span>` : '—'}</td></tr>`)}</tbody></table></div>
+      ${rows.length > limit ? html`<p style="text-align:center;margin-top:12px"><button class="btn btn-ghost" data-more>عرض المزيد (${rows.length - limit})</button></p>` : ''}`
       : html`<div class="empty"><p>لا توجد نتائج مطابقة.</p></div>`}`);
   }
   draw();
   bindRows(root);
   const sync = () => history.replaceState(null, '', '#/' + W.seg + '?' + new URLSearchParams({ q: state.q, only: state.only }).toString());
-  $('[data-q]', root).oninput = (e) => { state.q = e.target.value; draw(); sync(); };
-  $('[data-only]', root).onchange = (e) => { state.only = e.target.value; draw(); sync(); };
-  $('[data-csv]', root).onclick = () => { const t = $('[data-table]', root); if (t) exportTable(t, csvName(W.plural)); };
+  $('[data-q]', root).oninput = (e) => { state.q = e.target.value; limit = 300; draw(); sync(); };
+  $('[data-only]', root).onchange = (e) => { state.only = e.target.value; limit = 300; draw(); sync(); };
+  root.addEventListener('click', (e) => { if (e.target.closest('[data-more]')) { limit += 300; draw(); } });
+  // التصدير لكل النتائج لا للمعروض فقط
+  $('[data-csv]', root).onclick = () => { const keep = limit; limit = Infinity; draw(); const t = $('[data-table]', root); if (t) exportTable(t, csvName(W.plural)); limit = keep; draw(); };
 }
 
 export function form(kind, { root, params }) {

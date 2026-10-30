@@ -122,9 +122,11 @@ export function list(type, { root, query, path }) {
   $('[data-q]', root).oninput = (e) => { state.q = e.target.value; draw(); sync(); };
   const stSel = $('[data-st]', root);
   if (stSel) stSel.onchange = () => { state.st = stSel.value; draw(); sync(); };
+  // التصدير والطباعة لكل الصفوف، لا للمعروض منها فقط
+  const withAll = (fn) => { const keep = limit; limit = Infinity; draw(); try { fn(); } finally { limit = keep; draw(); } };
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-more]')) { limit += 200; draw(); }
-    if (e.target.closest('[data-csv]')) { const t = $('[data-table]', root); if (t) exportTable(t, csvName(T.plural)); }
+    if (e.target.closest('[data-csv]')) withAll(() => { const t = $('[data-table]', root); if (t) exportTable(t, csvName(T.plural)); });
   });
 }
 
@@ -285,14 +287,14 @@ export function form(type, { root, params, query }) {
   }
 
   function lineHTML(l, i, L) {
-    const n = (k, v, ph = '') => html`<input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="${k}" data-f="${k}${i}" value="${v ?? ''}" placeholder="${ph}">`;
+    const n = (k, v, ph = '', lab = '') => html`<input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="${k}" data-f="${k}${i}" value="${v ?? ''}" placeholder="${ph}" aria-label="${lab}، بند ${i + 1}">`;
     return html`<div class="line" data-i="${i}">
       <span class="c-idx">${i + 1}</span>
-      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small></div>
-      <div class="c-qty" data-label="الكمية">${n('qty', l.qty)}${unitSelect(l)}</div>
-      <div class="c-price" data-label="السعر">${n('price', l.price)}</div>
-      <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0')}</div>
-      <div class="c-tax" data-label="${taxLabel()}"><select class="inp" data-k="tax">${taxOptions(l.tax || 'S')}</select></div>
+      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً" aria-label="المنتج أو البيان، بند ${i + 1}">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small></div>
+      <div class="c-qty" data-label="الكمية">${n('qty', l.qty, '', 'الكمية')}${unitSelect(l)}</div>
+      <div class="c-price" data-label="السعر">${n('price', l.price, '', 'السعر')}</div>
+      <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0', 'الخصم %')}</div>
+      <div class="c-tax" data-label="${taxLabel()}"><select class="inp" data-k="tax" aria-label="${taxLabel()}، بند ${i + 1}">${taxOptions(l.tax || 'S')}</select></div>
       <div class="c-tot" data-label="الإجمالي"><span data-tot>${money(L ? L.total : 0)}</span></div>
       <div class="c-del"><button type="button" class="icon-btn" data-del aria-label="حذف البند">✕</button></div>
     </div>`;

@@ -47,7 +47,7 @@ export function list(type, { root, query, path }) {
     ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${NEW[type]}</a>${type === 'expense' ? html`<a class="btn btn-ghost" href="#/expenses/new?read=1">📷 من إيصال</a>` : ''}` })}
     <div class="toolbar">
       <input class="inp grow" type="search" data-q placeholder="بحث بالرقم أو الطرف أو البيان" value="${state.q}">
-      ${type === 'expense' ? html`<select class="inp" data-cat><option value="">كل البنود</option>${cats.map((c) => html`<option value="${c}">${accName(c)}</option>`)}</select>` : ''}
+      ${type === 'expense' ? html`<select class="inp" data-cat aria-label="بند المصروف"><option value="">كل البنود</option>${cats.map((c) => html`<option value="${c}">${accName(c)}</option>`)}</select>` : ''}
       ${periodBar(per)}
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button>
     </div>
@@ -89,9 +89,11 @@ export function list(type, { root, query, path }) {
   $('[data-q]', root).oninput = (e) => { state.q = e.target.value; draw(); sync(); };
   const cat = $('[data-cat]', root);
   if (cat) cat.onchange = () => { state.cat = cat.value; draw(); sync(); };
+  // التصدير والطباعة لكل الصفوف، لا للمعروض منها فقط
+  const withAll = (fn) => { const keep = limit; limit = Infinity; draw(); try { fn(); } finally { limit = keep; draw(); } };
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-more]')) { limit += 200; draw(); }
-    if (e.target.closest('[data-csv]')) { const t = $('[data-table]', root); if (t) exportTable(t, csvName(T.plural)); }
+    if (e.target.closest('[data-csv]')) withAll(() => { const t = $('[data-table]', root); if (t) exportTable(t, csvName(T.plural)); });
   });
 }
 
@@ -145,7 +147,7 @@ function expenseForm({ root, query }, existing, title) {
     <div class="card"><div class="form-grid">
       ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`)}
       <div class="fld span2"><span class="fld-l">بند المصروف</span><input class="inp" data-f="account" data-acc placeholder="مثال: إيجار، رواتب، كهرباء…" value="${d.account ? accName(d.account) : ''}"><small class="fld-e" data-err="account" hidden></small></div>
-      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}"><small class="fld-e" data-err="amount" hidden></small></div>
+      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}" aria-label="المبلغ"><small class="fld-e" data-err="amount" hidden></small></div>
       ${ccField(d)}
       ${showTax ? html`${field(taxLabel(), html`<select class="inp" data-k="tax">${taxOptions(d.tax || 'S')}</select>`)}
         <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" data-k="inclusive" ${d.inclusive ? raw('checked') : ''}> المبلغ شامل ${taxLabel()}</label>` : ''}
@@ -258,7 +260,7 @@ function voucherForm(type, { root, query }, existing, title) {
       <div class="fld span2" data-party-box><span class="fld-l" data-party-l></span><input class="inp" data-f="party" data-party value="${partyName(d.party)}" placeholder="ابحث بالاسم"><small class="fld-e" data-err="party" hidden></small><small class="fld-h" data-bal></small></div>
       <div class="fld span2" data-acc-box><span class="fld-l">الحساب</span><input class="inp" data-f="account" data-acc value="${d.account ? accName(d.account) : ''}" placeholder="${isR ? 'مثال: رأس المال، إيرادات أخرى، قرض' : 'مثال: جاري المالك، أصل ثابت، قرض'}"><small class="fld-e" data-err="account" hidden></small></div>
       <label class="fld span2" data-link-box><span class="fld-l">مقابل</span><select class="inp" data-link></select><small class="fld-h">اختر فاتورة محددة، أو اتركه تلقائياً ليُخصم من الأقدم فالأقدم</small></label>
-      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}"><small class="fld-e" data-err="amount" hidden></small></div>
+      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}" aria-label="المبلغ"><small class="fld-e" data-err="amount" hidden></small></div>
       <label class="fld"><span class="fld-l">${isR ? 'أودع في' : 'صُرف من'}</span><select class="inp" data-f="money" data-k="money">${moneyOptions(d.money)}</select><small class="fld-e" data-err="money" hidden></small></label>
       <label class="fld"><span class="fld-l">طريقة الدفع</span><select class="inp" data-k="method">${Object.entries(METHODS).map(([k, v]) => html`<option value="${k}" ${k === d.method ? raw('selected') : ''}>${v}</option>`)}</select></label>
       ${field('رقم الشيك / المرجع', html`<input class="inp" data-k="chequeNo" value="${d.chequeNo || ''}" dir="auto">`)}
@@ -375,7 +377,7 @@ function transferForm({ root }, existing, title) {
       ${field('التاريخ', html`<input class="inp" type="date" data-f="date" data-k="date" value="${d.date}">`)}
       <label class="fld"><span class="fld-l">من</span><select class="inp" data-f="from" data-k="from">${moneyOptions(d.from)}</select><small class="fld-e" data-err="from" hidden></small></label>
       <label class="fld"><span class="fld-l">إلى</span><select class="inp" data-f="to" data-k="to">${moneyOptions(d.to)}</select><small class="fld-e" data-err="to" hidden></small></label>
-      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}"><small class="fld-e" data-err="amount" hidden></small></div>
+      <div class="fld"><span class="fld-l">المبلغ</span><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="amount" data-k="amount" value="${d.amount}" aria-label="المبلغ"><small class="fld-e" data-err="amount" hidden></small></div>
       <div class="span-all">${field('البيان', html`<input class="inp" data-k="notes" value="${d.notes || ''}" placeholder="مثال: إيداع مبيعات اليوم في البنك">`)}</div>
     </div>${accs.length < 2 ? html`<p class="note note-info" style="margin-top:12px">لإضافة حساب بنكي أو محفظة أخرى: <a href="#/accounts">دليل الحسابات</a> ← إضافة حساب تحت «الأصول المتداولة» مع تفعيل «صندوق أو بنك».</p>` : ''}</div>`));
   root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k) { d[k] = e.target.value; guard.dirty = true; } });

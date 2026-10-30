@@ -37,6 +37,21 @@ export function getBooks() {
 }
 export const onExternalChange = (fn) => listeners.add(fn);
 
+// فهارس المعرّف ← العنصر للمستندات والعملاء والمنتجات والحسابات، تُبنى عند أول بحث بعد كل تغيير.
+// البحث الخطي كان يُستدعى داخل حلقات (قوائم العملاء والتحصيل والحركات) فيبطئ مع آلاف المستندات. المعرّف المكرر: الأول يغلب كما في find.
+const indexes = {};
+function lookup(key, id) {
+  if (!db) return null;
+  const list = db[key];
+  let c = indexes[key];
+  if (!c || c.rev !== rev || c.list !== list || c.n !== list.length) {
+    const map = new Map();
+    for (const x of list) if (!map.has(x.id)) map.set(x.id, x);
+    c = indexes[key] = { rev, list, n: list.length, map };
+  }
+  return c.map.get(id) || null;
+}
+
 // ─── IndexedDB ───
 let idbPromise = null;
 function idb() {
@@ -144,6 +159,8 @@ export function normalize(d) {
     recurring: arr(d.recurring).filter((r) => isObj(r.src) && typeof r.src.type === 'string'),
     audit: arr(d.audit).slice(-AUDIT_MAX),
   };
+  // ملفات قديمة أو مستوردة: ما تجاوز أحدث 1500 عملية يفقد نسخة «قبل التعديل» (تبقى للمحذوفات)
+  out.audit.forEach((x, i) => { if (i < out.audit.length - AUDIT_KEEP_BEFORE && x.act === 'update') delete x.before; });
   if (d.demo) out.demo = true;
   const byId = new Map(out.accounts.map((a) => [a.id, a]));
   // حسابات النظام الجديدة تُضاف للدليل القديم، والموجود منها يصير أساسياً لا يُحذف
@@ -205,16 +222,25 @@ export function setLockDate(date) {
     const before = d.settings.lockDate || '';
     d.settings.lockDate = date || '';
     d.audit.push({ id: newId(), at: now(), by: actor, act: 'lock', type: 'settings', doc: '', no: 0, date: date || '', amount: 0, from: before });
-    if (d.audit.length > AUDIT_MAX) d.audit.splice(0, d.audit.length - AUDIT_MAX);
+    trimAudit(d);
   });
 }
 
 // ─── سجل التعديلات: من أضاف أو عدّل أو حذف، ومتى، ونسخة المستند قبل التغيير ───
-const AUDIT_MAX = 1500;
+// آخر 10 آلاف عملية تُحفظ بتفاصيلها الأساسية (من وماذا ومتى وكم)، ونسخة المستند الكاملة قبل التعديل لآخر 1500 فقط توفيراً للمساحة.
+// نسخ المحذوفات تبقى دائماً (قليلة، وهي ما يُحتاج لاسترجاعه).
+export const AUDIT_MAX = 10000;
+export const AUDIT_KEEP_BEFORE = 1500;
+function trimAudit(d) {
+  const a = d.audit;
+  if (a.length > AUDIT_MAX) a.splice(0, a.length - AUDIT_MAX);
+  const old = a[a.length - 1 - AUDIT_KEEP_BEFORE]; // العملية التي خرجت للتو من أحدث 1500
+  if (old && old.act === 'update') delete old.before;
+}
 function audit(d, act, doc, before) {
   const dec = currencyInfo(d.settings.currency).dec;
   d.audit.push({ id: newId(), at: now(), by: actor, act, type: doc.type, doc: doc.id, no: doc.no, date: doc.date, amount: docAmount(doc, dec), ...(before ? { before } : {}) });
-  if (d.audit.length > AUDIT_MAX) d.audit.splice(0, d.audit.length - AUDIT_MAX);
+  trimAudit(d);
 }
 const snapshot = (x) => JSON.parse(JSON.stringify(x));
 
@@ -293,10 +319,10 @@ export function patchDoc(id, patch, { log = false } = {}) {
   });
 }
 
-export const findDoc = (id) => (db ? db.docs.find((x) => x.id === id) : null);
+export const findDoc = (id) => lookup('docs', id);
 
 // ─── العملاء والموردون ───
-export const findParty = (id) => (db ? db.parties.find((x) => x.id === id) : null);
+export const findParty = (id) => lookup('parties', id);
 export function saveParty(p) {
   mutate((d) => {
     const i = p.id ? d.parties.findIndex((x) => x.id === p.id) : -1;
@@ -312,7 +338,7 @@ export function deleteParty(id) {
 }
 
 // ─── المنتجات ───
-export const findProduct = (id) => (db ? db.products.find((x) => x.id === id) : null);
+export const findProduct = (id) => lookup('products', id);
 export function saveProduct(p) {
   mutate((d) => {
     const i = p.id ? d.products.findIndex((x) => x.id === p.id) : -1;
@@ -328,7 +354,7 @@ export function deleteProduct(id) {
 }
 
 // ─── الحسابات ───
-export const findAccount = (id) => (db ? db.accounts.find((x) => x.id === id) : null);
+export const findAccount = (id) => lookup('accounts', id);
 export function saveAccount(a) {
   mutate((d) => {
     const i = a.id ? d.accounts.findIndex((x) => x.id === a.id) : -1;

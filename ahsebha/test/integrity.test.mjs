@@ -242,6 +242,30 @@ test('المخزن: الفاتورة الصادرة لا تُحذف إلا بإ�
   assert.ok(store.getDb().audit.some((x) => x.act === 'delete' && x.doc === b.id && x.before), 'نسخة المحذوف في السجل');
 });
 
+test('سجل التعديلات: عشرة آلاف عملية، ونسخة «قبل التعديل» لأحدث 1500 فقط، والمحذوفات تبقى', () => {
+  store.replaceDb({ app: 'ahsebha-accounting', settings: defaultSettings({ name: 'x', startDate: '2026-01-01', vat: false }), accounts: defaultAccounts(), parties: [], products: [], docs: [] });
+  const mk = (type) => ({ type, date: '2026-02-01', party: null, vatRate: 0, lines: [{ product: null, desc: 'بند', qty: 1, price: 10, disc: 0, tax: 'S' }], paid: 10, payAcc: 'cash', notes: '' });
+  const gone = store.saveDoc(mk('purchase'));
+  store.deleteDoc(gone.id);
+  let d = store.saveDoc(mk('sale'));
+  for (let i = 0; i < 1700; i++) d = store.saveDoc({ ...d, notes: 'n' + i });
+  let a = store.getDb().audit;
+  assert.equal(a.filter((x) => x.act === 'update').length, 1700);
+  assert.ok(a.slice(-store.AUDIT_KEEP_BEFORE).filter((x) => x.act === 'update').every((x) => x.before), 'الأحدث 1500: نسخة قبل التعديل موجودة');
+  assert.ok(a.slice(0, a.length - store.AUDIT_KEEP_BEFORE).filter((x) => x.act === 'update').every((x) => !x.before), 'الأقدم: بلا نسخة كاملة');
+  assert.ok(a.find((x) => x.act === 'delete' && x.doc === gone.id).before, 'نسخة المحذوف تبقى');
+  // حتى سقف السجل: يُقصّ الأقدم فقط
+  for (let i = 0; i < 9000; i++) d = store.saveDoc({ ...d, notes: 'm' + i });
+  a = store.getDb().audit;
+  assert.equal(a.length, store.AUDIT_MAX);
+  assert.ok(a.slice(-store.AUDIT_KEEP_BEFORE).every((x) => x.before), 'الأحدث بنسخ كاملة');
+  // الحفظ والتحميل (normalize) لا يعيد النسخ المحذوفة ولا يتجاوز السقف
+  const back = JSON.parse(JSON.stringify(store.getDb()));
+  back.audit = [...back.audit, ...back.audit.slice(0, 50)];
+  store.replaceDb(back);
+  assert.ok(store.getDb().audit.length <= store.AUDIT_MAX);
+});
+
 // ─── اختبار عشوائي ثابت (بذور محددة): بعد إلغاء فواتير عشوائية تبقى كل التوازنات سليمة ───
 function rng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 for (const country of ['JO', 'SA', 'IQ']) {

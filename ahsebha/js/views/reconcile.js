@@ -18,7 +18,7 @@ export function view({ root, query }) {
   const draft = recs.find((r) => !r.done);
   const cur = query.id ? store.findRecon(query.id) : query.new ? null : draft || null;
   const B = store.getBooks();
-  const picker = html`<select class="inp" data-acc>${accs.map((a) => html`<option value="${a.id}" ${a.id === acc.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`;
+  const picker = html`<select class="inp" data-acc aria-label="الحساب">${accs.map((a) => html`<option value="${a.id}" ${a.id === acc.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`;
 
   if (!cur) {
     const last = recs.find((r) => r.done);

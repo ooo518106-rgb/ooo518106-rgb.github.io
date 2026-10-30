@@ -33,7 +33,7 @@ export function pos({ root }) {
   let cat = '';
   const accs = posAccounts();
 
-  root.innerHTML = String(html`<div class="pos-screen">
+  root.innerHTML = String(html`<h1 class="sr-only">الكاشير</h1><div class="pos-screen">
     <section class="pos-products">
       <div class="pos-search"><input class="inp" data-scan placeholder="ابحث بالاسم أو امسح الباركود (مثال للكمية: 3*الباركود)" autocomplete="off" enterkeyhint="done">
         <button class="btn btn-ghost" data-cam title="مسح بالكاميرا">📷</button><button class="btn btn-ghost" data-settings title="إعدادات الكاشير">⚙️</button></div>

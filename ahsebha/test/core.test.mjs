@@ -36,6 +36,37 @@ test('round() يقرّب بدقة', () => {
   assert.equal(Object.is(round(-0.001, 2), 0), true);
 });
 
+test('round() السريع يطابق الأصل (التقريب عبر نص 15 خانة) بتاتياً على مدخلات كثيرة', () => {
+  // الأصل كما كان قبل التسريع: أبطأ بكثير لكنه المرجع
+  const ref = (x, d = 2) => {
+    const v = Number(x);
+    if (!Number.isFinite(v)) return 0;
+    const f = 10 ** d;
+    const r = Math.round(Number((Math.abs(v) * f).toPrecision(15))) / f;
+    return v < 0 ? (-r || 0) : r;
+  };
+  let a = 12345;
+  const rnd = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const special = [0, -0, 1.005, 2.675, 8.345, 0.5, 1.5, 2.5, -0.5, 0.49999999999999994, 4503599627370495.5, 1e15, 1e16, 1e21, 123456789.125, 0.1 + 0.2, 1e-7, 5e-324, NaN, Infinity, -Infinity, '12.345', '', null, undefined, 1994896116.6664958];
+  const bad = [];
+  const check = (x, d) => { if (!Object.is(round(x, d), ref(x, d))) bad.push([x, d]); };
+  for (const x of special) for (let d = 0; d <= 8; d++) check(x, d);
+  for (let i = 0; i < 400000; i++) {
+    const d = Math.floor(rnd() * 7);
+    const k = i % 8;
+    const x = k === 0 ? (rnd() - 0.5) * 2000
+      : k === 1 ? Math.round(rnd() * 1e7) / 1000
+      : k === 2 ? Math.round(rnd() * 1e6) / 8
+      : k === 3 ? (Math.round(rnd() * 1e5) / 100) * (1 + Math.floor(rnd() * 9)) * 0.16
+      : k === 4 ? (Math.round(rnd() * 1e6) / 100) / 1.16
+      : k === 5 ? (Math.floor(rnd() * 1e6) + 0.5) / 10 ** Math.floor(rnd() * 5)
+      : k === 6 ? rnd() * 10 ** Math.floor(rnd() * 16)
+      : (Math.floor(rnd() * 1e5) + 0.005) * (rnd() < 0.5 ? 1 : -1);
+    check(x, d);
+  }
+  assert.deepEqual(bad.slice(0, 5), []);
+});
+
 test('calcDoc: خصم وضريبة وأسعار شاملة وفئات', () => {
   const T = calcDoc({ vatRate: 15, lines: [{ qty: 5, price: 50, disc: 10, tax: 'S' }, { qty: 1, price: 100, tax: 'Z' }, { qty: 2, price: 10, tax: 'E' }] });
   assert.deepEqual([T.lines[0].gross, T.lines[0].discount, T.lines[0].net, T.lines[0].vat, T.lines[0].total], [250, 25, 225, 33.75, 258.75]);
