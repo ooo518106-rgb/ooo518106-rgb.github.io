@@ -45,6 +45,8 @@ export function defaultSettings(o = {}) {
     vat: c.vatRate > 0, vatRate: c.vatRate, taxLabel: c.taxLabel, inclusive: false,
     startDate: '', fiscalStartMonth: 1,
     salePrefix: 'INV-', invoiceNote: '', printSize: 'a4', showHijri: false,
+    // الفواتير الصادرة لا تُحذف (تُلغى بإشعار دائن) ما لم يسمح المالك، والبيع بأكثر من المخزون: تنبيه (warn) أو منع (block)
+    allowDeleteInvoices: false, negativeStock: 'warn',
     lastBackupAt: null,
     ...o,
   };
@@ -943,7 +945,99 @@ export function buildBooks(db, opts = {}) {
     }
   }
 
-  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves };
+  // الفواتير الملغاة: فاتورة لها إشعار دائن (cancels) يعكسها كاملة
+  const cancelled = new Map();
+  for (const d of db.docs || []) if (d.type === 'sreturn' && d.cancels && d.refId) cancelled.set(d.refId, d.id);
+
+  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves, cancelled };
+}
+
+// ═══ الإرجاع والإلغاء والمخزون السالب ═══
+
+// الكمية التي ما زال يمكن إرجاعها من فاتورة (منتج ← كمية بالوحدة الأساسية)، بعد المرتجعات السابقة؛ null إن لم توجد الفاتورة
+export function returnableQty(db, refId, type, exceptId = null) {
+  const ref = (db.docs || []).find((x) => x.id === refId);
+  if (!ref) return null;
+  const left = new Map();
+  for (const l of ref.lines || []) if (l.product) left.set(l.product, round((left.get(l.product) || 0) + num(l.qty) * lineFactor(l), 3));
+  for (const x of db.docs || []) {
+    if (x.refId !== refId || x.type !== type || x.id === exceptId) continue;
+    for (const l of x.lines || []) if (l.product && left.has(l.product)) left.set(l.product, round(left.get(l.product) - num(l.qty) * lineFactor(l), 3));
+  }
+  return left;
+}
+
+// بنود مرتجع لما تبقى من فاتورة: الكمية التي لم تُرجَع بعد من كل منتج (والبنود بلا منتج تُنسخ ما لم يسبق مرتجع عليها)
+export function returnLines(db, ref, type, exceptId = null) {
+  const left = returnableQty(db, ref.id, type, exceptId) || new Map();
+  const prior = (db.docs || []).some((x) => x.type === type && x.refId === ref.id && x.id !== exceptId);
+  const take = new Map();
+  const lines = [];
+  for (const l of ref.lines || []) {
+    if (!l.product) { if (!prior) lines.push({ ...l }); continue; }
+    const f = lineFactor(l);
+    const room = round((left.get(l.product) || 0) - (take.get(l.product) || 0), 3);
+    const q = Math.min(num(l.qty), room > 0 ? round(room / f, 6) : 0);
+    if (!(q > 0)) continue;
+    take.set(l.product, round((take.get(l.product) || 0) + q * f, 3));
+    lines.push({ ...l, qty: q });
+  }
+  return lines;
+}
+
+// إشعار دائن يلغي ما تبقى من فاتورة مبيعات (الإلغاء القانوني: الفاتورة تبقى برقمها والإشعار برقمه).
+// refund: { acc } لرد المدفوع عند الإصدار من هذا الحساب للعميل المسجّل؛ الفاتورة بلا عميل تُردّ كاملة من حسابات دفعها.
+export function cancelCreditNote(db, inv, { date, reason = '', refund = null } = {}) {
+  const dec = currencyInfo(db.settings?.currency).dec;
+  const lines = returnLines(db, inv, 'sreturn');
+  const cn = {
+    type: 'sreturn', date, party: inv.party || '', refId: inv.id, cancels: true, vatRate: inv.vatRate, inclusive: !!inv.inclusive, lines,
+    notes: `إلغاء الفاتورة ${docNo(inv, db.settings)}${reason ? ' — ' + reason : ''}`,
+  };
+  if (inv.wh) cn.wh = inv.wh;
+  if (inv.cc) cn.cc = inv.cc;
+  const total = calcDoc(cn, dec).total;
+  const prior = (db.docs || []).some((x) => x.type === 'sreturn' && x.refId === inv.id);
+  if (!inv.party) {
+    // بيع نقدي بلا عميل: يُردّ المبلغ كاملاً من نفس طرق الدفع
+    const back = [];
+    let rest = total;
+    for (const p of paymentList(inv).filter((x) => num(x.amount) > 0)) {
+      const a = round(Math.min(num(p.amount), rest), dec);
+      if (a > 0) { back.push({ acc: p.acc, amount: a }); rest = round(rest - a, dec); }
+    }
+    if (rest > 0) { if (back.length) back[0].amount = round(back[0].amount + rest, dec); else back.push({ acc: (refund && refund.acc) || 'cash', amount: rest }); }
+    if (back.length > 1) cn.payments = back;
+    else { cn.paid = total; cn.payAcc = back[0].acc; }
+  } else if (refund && refund.acc && !prior) {
+    const paid = round(Math.min(total, paymentList(inv).reduce((t, p) => t + Math.max(0, num(p.amount)), 0)), dec);
+    if (paid > 0) { cn.paid = paid; cn.payAcc = refund.acc; }
+  }
+  return cn;
+}
+
+// نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله)
+export function stockShortages(db, books, doc, existing = null) {
+  if (!doc || (doc.type !== 'sale' && doc.type !== 'preturn')) return [];
+  const products = new Map((db.products || []).map((p) => [p.id, p]));
+  const sum = (d) => {
+    const m = new Map();
+    for (const l of (d && d.lines) || []) {
+      const p = products.get(l.product);
+      if (p && p.type === 'stock') m.set(p.id, round((m.get(p.id) || 0) + num(l.qty) * lineFactor(l), 3));
+    }
+    return m;
+  };
+  const want = sum(doc);
+  const mine = existing && existing.type === doc.type && (existing.wh || null) === (doc.wh || null) ? sum(existing) : new Map();
+  const multi = (db.warehouses || []).length > 0 && doc.wh;
+  const out = [];
+  for (const [pid, w] of want) {
+    const have = multi ? (books.whQty.get(pid)?.get(doc.wh) || 0) : (books.stock.get(pid)?.qty || 0);
+    const avail = round(have + (mine.get(pid) || 0), 3);
+    if (w > avail + 1e-9) out.push({ product: pid, name: products.get(pid).name, want: w, have: avail });
+  }
+  return out;
 }
 
 export function matchItems(list, R = (x) => round(x, 2)) {
@@ -1374,6 +1468,42 @@ export function validateDoc(db, d) {
       if (num(l.disc) < 0 || num(l.disc) > 100) e['disc' + i] = 'الخصم بين 0 و 100';
       if (!l.product && !String(l.desc || '').trim()) e['desc' + i] = 'اختر منتجاً أو اكتب وصفاً';
     });
+    if ((d.type === 'sreturn' || d.type === 'preturn') && d.refId) {
+      // المرتجع لا يتجاوز ما بيع في الفاتورة الأصلية بعد خصم المرتجعات السابقة عليها
+      const left = returnableQty(db, d.refId, d.type, d.id);
+      if (left) {
+        const asked = new Map();
+        lines.forEach((l, i) => {
+          if (!l.product) return;
+          const q = round(num(l.qty) * lineFactor(l), 3);
+          asked.set(l.product, round((asked.get(l.product) || 0) + q, 3));
+          const room = left.get(l.product) || 0;
+          if (!left.has(l.product)) e['qty' + i] = 'هذا المنتج ليس في الفاتورة الأصلية';
+          else if (asked.get(l.product) > room + 1e-9) e['qty' + i] = room > 0 ? `الكمية أكبر من المتبقي للإرجاع من الفاتورة الأصلية (${room})` : 'أُرجعت كل كمية هذا المنتج من الفاتورة الأصلية';
+        });
+      }
+    }
+    if ((d.type === 'sale' || d.type === 'purchase') && d.id) {
+      // فاتورة عليها مرتجعات: لا تُعدَّل بحيث تقل كمية منتج عمّا أُرجع منه، والملغاة بإشعار دائن لا تُعدَّل
+      const rt = d.type === 'sale' ? 'sreturn' : 'preturn';
+      const back = new Map();
+      let cancels = false;
+      for (const x of db.docs || []) {
+        if (x.refId !== d.id || x.type !== rt) continue;
+        if (x.cancels) cancels = true;
+        for (const l of x.lines || []) if (l.product) back.set(l.product, round((back.get(l.product) || 0) + num(l.qty) * lineFactor(l), 3));
+      }
+      if (cancels) e.lines = 'الفاتورة ملغاة بإشعار دائن ولا يمكن تعديلها';
+      else {
+        for (const [pid, q] of back) {
+          let have = 0, at = -1;
+          lines.forEach((l, i) => { if (l.product === pid) { have = round(have + num(l.qty) * lineFactor(l), 3); at = i; } });
+          if (have + 1e-9 >= q) continue;
+          if (at < 0) e.lines = 'لا يمكن حذف منتج أُرجع منه جزء من الفاتورة';
+          else e['qty' + at] = `الكمية أقل مما أُرجع من هذه الفاتورة (${q})`;
+        }
+      }
+    }
     if (d.party && (!party || party.kind !== T.party)) e.party = T.party === 'customer' ? 'اختر عميلاً صحيحاً' : 'اختر مورداً صحيحاً';
     if (T.order && !d.party) e.party = T.party === 'customer' ? 'اختر العميل' : 'اختر المورد';
     if (!NO_POSTING.includes(d.type)) payRules(calcDoc(d, dec).total, T.party);

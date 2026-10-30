@@ -260,15 +260,20 @@ export function saveDoc(doc) {
   return doc;
 }
 
+// الفاتورة الصادرة ومرتجعها لا يُحذفان (تُلغى بإشعار دائن) ما لم يسمح المالك من الإعدادات
+const KEPT_TYPES = ['sale', 'sreturn'];
+export const canDeleteDoc = (doc) => !!doc && (!KEPT_TYPES.includes(doc.type) || !!(db && db.settings.allowDeleteInvoices));
+
 export function deleteDoc(id) {
   const gone = db.docs.find((x) => x.id === id);
   assertOpen(gone);
+  if (gone && !canDeleteDoc(gone)) throw new Error('الفاتورة الصادرة لا تُحذف. ألغها بإشعار دائن من صفحتها (أو فعّل «السماح بحذف الفواتير» من الإعدادات)');
   if (gone && gone.files && gone.files.length) deleteFiles(gone.files.map((f) => f.id)).catch(() => {});
   mutate((d) => {
     const doc = d.docs.find((x) => x.id === id);
     if (doc) audit(d, 'delete', doc, snapshot(doc));
     d.docs = d.docs.filter((x) => x.id !== id);
-    if (doc && d.seq[doc.type] === doc.no + 1) d.seq[doc.type] = doc.no;
+    // رقم المستند المحذوف لا يُعاد استعماله: يبقى فراغاً في التسلسل ظاهراً في سجل التعديلات
     for (const x of d.docs) {
       if (x.refId === id) x.refId = null;
       if (x.link === id) x.link = null;

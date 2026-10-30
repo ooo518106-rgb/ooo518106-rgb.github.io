@@ -1,12 +1,12 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor } from '../core.js';
-import { html, raw, money, fmtDate, toast, confirmBox, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines } from '../core.js';
+import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, docStatus, periodOf, periodBar, bindPeriod, inPeriod,
-  moneyList, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
+  moneyList, moneyOptions, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
   docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
@@ -47,8 +47,8 @@ export function list(type, { root, query, path }) {
     ${head(T.plural, { sub: `${all.length} مستند`, actions: html`<a class="btn btn-primary" href="#/${SEG[type]}/new">➕ ${C.newLabel}</a>${type === 'purchase' ? html`<a class="btn btn-ghost" href="#/purchases/new?read=1">📷 من فاتورة</a>` : ''}` })}
     <div class="toolbar">
       <input class="inp grow" type="search" data-q placeholder="بحث بالرقم أو ${kindName(C.kind)} أو الملاحظات" value="${state.q}">
-      ${hasPay ? html`<select class="inp" data-st><option value="">كل الحالات</option><option value="unpaid">غير مدفوعة</option><option value="partial">مدفوعة جزئياً</option><option value="overdue">متأخرة</option><option value="paid">مدفوعة</option></select>` : ''}
-      ${NO_POSTING.includes(type) ? html`<select class="inp" data-st><option value="">الكل</option><option value="open">مفتوحة</option><option value="converted">تحوّلت لفواتير</option></select>` : ''}
+      ${hasPay ? html`<select class="inp" data-st aria-label="الحالة"><option value="">كل الحالات</option><option value="unpaid">غير مدفوعة</option><option value="partial">مدفوعة جزئياً</option><option value="overdue">متأخرة</option><option value="paid">مدفوعة</option>${type === 'sale' ? html`<option value="cancelled">ملغاة</option>` : ''}</select>` : ''}
+      ${NO_POSTING.includes(type) ? html`<select class="inp" data-st aria-label="الحالة"><option value="">الكل</option><option value="open">مفتوحة</option><option value="converted">تحوّلت لفواتير</option></select>` : ''}
       ${periodBar(per)}
       <button class="btn btn-ghost btn-sm" data-csv>⬇️ Excel</button>
     </div>
@@ -74,11 +74,12 @@ export function list(type, { root, query, path }) {
       return;
     }
     let total = 0, paid = 0, due = 0;
+    // الفواتير الملغاة بإشعار دائن تظهر في القائمة ولا تدخل الإجماليات
+    const tally = (d, t, st) => { if (st && st.state === 'cancelled') return; total += t.total; if (st && hasPay) { paid += st.paid; due += st.due; } };
     const body = rows.slice(0, limit).map((d) => {
       const t = B.totals.get(d.id) || calcDoc(d, dec());
       const st = docStatus(d, B);
-      total += t.total;
-      if (st && hasPay) { paid += st.paid; due += st.due; }
+      tally(d, t, st);
       const ref = d.refId ? store.findDoc(d.refId) : null;
       return html`<tr data-href="${docHref(d)}">
         <td class="nowrap"><b dir="ltr">${docNo(d, s)}</b></td>
@@ -96,7 +97,7 @@ export function list(type, { root, query, path }) {
     // الإجماليات على كل النتائج وليس المعروضة فقط
     if (rows.length > limit) {
       total = 0; paid = 0; due = 0;
-      for (const d of rows) { const t = B.totals.get(d.id) || calcDoc(d, dec()); total += t.total; const st = docStatus(d, B); if (st && hasPay) { paid += st.paid; due += st.due; } }
+      for (const d of rows) tally(d, B.totals.get(d.id) || calcDoc(d, dec()), docStatus(d, B));
     }
     out.innerHTML = String(html`
       <div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>الإجمالي: <b>${money(total, { sym: true })}</b></span>
@@ -137,6 +138,11 @@ export function form(type, { root, params, query }) {
   const existing = params.id ? store.findDoc(params.id) : null;
   if (params.id && (!existing || existing.type !== type)) { root.innerHTML = String(empty('🔎', 'المستند غير موجود')); return; }
   if (existing && docLocked(existing)) { setTitle(T.name); root.innerHTML = String(lockedPage(existing)); return; }
+  if (existing && type === 'sale' && store.getBooks().cancelled.has(existing.id)) {
+    setTitle(T.name);
+    root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🚫</div><h3>الفاتورة ملغاة</h3><p>أُلغيت بإشعار دائن ولا يمكن تعديلها. لتصحيحها أصدر فاتورة جديدة.</p><p><a class="btn btn-ghost" href="${docHref(existing)}">العودة للفاتورة</a></p></div>`);
+    return;
+  }
 
   // ── الحالة الابتدائية ──
   let d;
@@ -154,7 +160,9 @@ export function form(type, { root, params, query }) {
     }
     const refDoc = store.findDoc(query.ref);
     if (refDoc && C.ref && refDoc.type === C.ref) {
-      d.refId = refDoc.id; d.party = refDoc.party; d.lines = clone(refDoc.lines); d.inclusive = !!refDoc.inclusive; d.vatRate = num(refDoc.vatRate);
+      // المرتجع يبدأ بما تبقى للإرجاع من الفاتورة (بعد المرتجعات السابقة)
+      const rest = returnLines(db, refDoc, type);
+      d.refId = refDoc.id; d.party = refDoc.party; d.lines = rest.length ? rest : [emptyLine()]; d.inclusive = !!refDoc.inclusive; d.vatRate = num(refDoc.vatRate);
     }
     if (query.product) { const p = store.findProduct(query.product); if (p) d.lines = [lineFromProduct(p)]; }
   }
@@ -189,7 +197,9 @@ export function form(type, { root, params, query }) {
   }
 
   function lineFromProduct(p) {
-    return { product: p.id, desc: p.name, qty: 1, price: num(p[C.priceKey]) || '', disc: '', tax: showTax ? (p.tax || 'S') : 'S' };
+    // نفس showTax، لكن هذه الدالة تُستدعى من «بيع/شراء» في صفحة المنتج قبل تعريفه
+    const taxed = !!s.vat || num(d.vatRate) > 0;
+    return { product: p.id, desc: p.name, qty: 1, price: num(p[C.priceKey]) || '', disc: '', tax: taxed ? (p.tax || 'S') : 'S' };
   }
   const calc = () => calcDoc(d, dec());
 
@@ -198,7 +208,9 @@ export function form(type, { root, params, query }) {
 
   const refOptions = () => {
     if (!C.ref) return '';
-    const docs = db.docs.filter((x) => x.type === C.ref && (!d.party || x.party === d.party)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300);
+    // الفواتير الملغاة بإشعار دائن لا يُرجَع منها (إلا إن كانت هي المختارة الآن)
+    const cancelled = store.getBooks().cancelled;
+    const docs = db.docs.filter((x) => x.type === C.ref && (!d.party || x.party === d.party) && (!cancelled.has(x.id) || x.id === d.refId)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300);
     return html`<option value="">— بدون —</option>${docs.map((x) => html`<option value="${x.id}" ${x.id === d.refId ? raw('selected') : ''}>${docNo(x, s)} — ${fmtDate(x.date)} — ${moneyText(calcDoc(x, dec()).total)}</option>`)}`;
   };
 
@@ -276,7 +288,7 @@ export function form(type, { root, params, query }) {
     const n = (k, v, ph = '') => html`<input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="${k}" data-f="${k}${i}" value="${v ?? ''}" placeholder="${ph}">`;
     return html`<div class="line" data-i="${i}">
       <span class="c-idx">${i + 1}</span>
-      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small></div>
+      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small></div>
       <div class="c-qty" data-label="الكمية">${n('qty', l.qty)}${unitSelect(l)}</div>
       <div class="c-price" data-label="السعر">${n('price', l.price)}</div>
       <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0')}</div>
@@ -426,7 +438,9 @@ export function form(type, { root, params, query }) {
   function copyRef() {
     const r = store.findDoc(d.refId);
     if (!r) return;
-    d.lines = clone(r.lines); d.inclusive = !!r.inclusive; d.vatRate = num(r.vatRate);
+    const rest = returnLines(db, r, type, existing && existing.id);
+    if (!rest.length) toast('أُرجعت كل بنود هذه الفاتورة مسبقاً', 'warn');
+    d.lines = rest.length ? rest : [emptyLine()]; d.inclusive = !!r.inclusive; d.vatRate = num(r.vatRate);
     if (!d.party) { d.party = r.party; $('[data-party]', root).value = partyName(r.party); partyInfo(); }
     const inc = $('[data-k="inclusive"]', root);
     if (inc) inc.checked = d.inclusive;
@@ -495,6 +509,12 @@ export function form(type, { root, params, query }) {
       }
     }
     const errs = validateDoc(db, doc);
+    // سياسة المخزون: إن اختار المالك «منع» فلا يُحفظ بيع أو مرتجع مشتريات بأكثر من المتوفر
+    if (!Object.keys(errs).length && s.negativeStock === 'block') {
+      for (const sh of stockShortages(db, store.getBooks(), doc, existing)) {
+        doc.lines.forEach((l, i) => { if (l.product === sh.product) errs['qty' + i] = `المتوفر ${sh.have} فقط، والبرنامج مضبوط على منع البيع بأكثر من المخزون`; });
+      }
+    }
     if (!showErrors(root, errs)) { toast('راجع الحقول المظللة باللون الأحمر', 'err'); return; }
     // نسخة العرض: إن وصلت حدها تظهر نافذة التفعيل وتبقى الفاتورة كما كتبها المستخدم على الشاشة
     try { store.saveDoc(doc); } catch (e) { if (handleDemoError(e)) return; throw e; }
@@ -529,6 +549,7 @@ export function show(type, { root, params, query }) {
   const locked = docLocked(d);
 
   const returns = store.getDb().docs.filter((x) => x.refId === d.id);
+  const cancelledBy = type === 'sale' && B.cancelled.has(d.id) ? store.findDoc(B.cancelled.get(d.id)) : null;
   const apps = B.applications.get(d.id) || [];
   const ref = d.refId ? store.findDoc(d.refId) : null;
   const quote = d.fromQuote ? store.findDoc(d.fromQuote) : null;
@@ -548,13 +569,15 @@ export function show(type, { root, params, query }) {
         ${isOrder(type) && !conv ? html`<a class="btn btn-ghost" href="#/${C.to}/new?from=${d.id}">✅ تحويل إلى ${type === 'sorder' ? 'فاتورة مبيعات' : 'فاتورة مشتريات'}</a>` : ''}
         ${type === 'sale' || type === 'sorder' ? html`<button class="btn btn-ghost" data-delivery>🚚 سند تسليم</button>` : ''}
         ${type === 'sale' || type === 'purchase' ? html`<button class="btn btn-ghost" data-repeat>♻️ تكرار</button>` : ''}
-        ${retHref ? html`<a class="btn btn-ghost" href="${retHref}">${type === 'sale' ? '↩️' : '↪️'} مرتجع</a>` : ''}
+        ${retHref && !cancelledBy ? html`<a class="btn btn-ghost" href="${retHref}">${type === 'sale' ? '↩️' : '↪️'} مرتجع</a>` : ''}
         ${C.kind === 'customer' || type === 'porder' ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}
         <a class="btn btn-ghost" href="#/${SEG[type]}/new?copy=${d.id}">📄 نسخ</a>
-        ${locked ? '' : html`<a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>
-        <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}`,
+        ${type === 'sale' && !cancelledBy && !locked ? html`<button class="btn btn-ghost" data-cancel>🚫 إلغاء الفاتورة</button>` : ''}
+        ${locked ? '' : html`${cancelledBy ? '' : html`<a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>`}
+        ${store.canDeleteDoc(d) ? html`<button class="btn btn-text-danger" data-del>🗑️ حذف</button>` : ''}`}`,
     })}
     ${locked ? lockedNote(d) : ''}
+    ${cancelledBy ? html`<p class="note note-warn" style="margin-bottom:12px">🚫 هذه الفاتورة ملغاة بإشعار دائن <a href="${docHref(cancelledBy)}">${docNo(cancelledBy, s)}</a> بتاريخ ${fmtDate(cancelledBy.date)}${cancelledBy.notes && cancelledBy.notes.includes(' — ') ? ' — ' + cancelledBy.notes.split(' — ').slice(1).join(' — ') : ''}. تبقى برقمها في السجل، وأثرها على المبيعات والضريبة والمخزون عُكس بالكامل.</p>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       <div class="kpi"><span class="kpi-l">الإجمالي</span><span class="kpi-v">${money(t.total, { sym: true })}</span>${t.vat ? html`<span class="kpi-s">منها ${taxLabel()} ${money(t.vat)}</span>` : ''}</div>
       ${st && st.state ? html`
@@ -568,7 +591,7 @@ export function show(type, { root, params, query }) {
     ${d.wh || d.cc ? html`<p class="muted small" style="margin-bottom:10px">${[d.wh ? '🏬 ' + whLabel(d.wh) : '', d.cc ? '📍 ' + ccLabel(d.cc) : ''].filter(Boolean).join(' · ')}</p>` : ''}
     ${ref ? html`<p class="note note-info" style="margin-bottom:12px">مرتبط بالفاتورة الأصلية <a href="${docHref(ref)}">${docNo(ref, s)}</a></p>` : ''}
     ${quote ? html`<p class="note note-info" style="margin-bottom:12px">محوّل من ${DOC_TYPES[quote.type]?.name || 'مستند'} <a href="${docHref(quote)}">${docNo(quote, s)}</a></p>` : ''}
-    ${returns.length ? html`<p class="note note-warn" style="margin-bottom:12px">عليها مرتجعات: ${returns.map((r, i) => html`${i ? '، ' : ''}<a href="${docHref(r)}">${docNo(r, s)}</a>`)}</p>` : ''}
+    ${returns.some((r) => !cancelledBy || r.id !== cancelledBy.id) ? html`<p class="note note-warn" style="margin-bottom:12px">عليها مرتجعات: ${returns.filter((r) => !cancelledBy || r.id !== cancelledBy.id).map((r, i) => html`${i ? '، ' : ''}<a href="${docHref(r)}">${docNo(r, s)}</a>`)}</p>` : ''}
     ${d.scan ? html`<p class="note note-info" style="margin-bottom:12px">🧾 ${d.scan.kind === 'qr' ? 'مقروءة من رمز QR الضريبي' : 'مقروءة من صورة الفاتورة'}${d.scan.seller ? ` · ${d.scan.seller}` : ''}${receiptCheck(d.scan, t)}</p>` : ''}
     <div class="paper-wrap">${docPaper(d, { size })}</div>
     <div data-att></div>
@@ -602,10 +625,53 @@ export function show(type, { root, params, query }) {
   const del = $('[data-del]', root);
   if (del) del.onclick = async () => {
     const linked = returns.length || apps.some((a) => a.doc !== d.id);
-    const msg = `سيتم حذف ${T.name} ${no} نهائياً مع قيدها وأثرها على المخزون.${linked ? ' المرتجعات والسندات المرتبطة بها ستبقى لكن بدون ربط.' : ''}${s.vat && (type === 'sale' || type === 'sreturn') ? ' ملاحظة: الأسلم ضريبياً إصدار إشعار دائن بدلاً من الحذف.' : ''}`;
+    const msg = `سيتم حذف ${T.name} ${no} نهائياً مع قيدها وأثرها على المخزون.${linked ? ' المرتجعات والسندات المرتبطة بها ستبقى لكن بدون ربط.' : ''}${s.vat && (type === 'sale' || type === 'sreturn') ? ' ملاحظة: الأسلم ضريبياً إصدار إشعار دائن بدلاً من الحذف.' : ''} ورقمها لا يُعاد استعماله.`;
     if (!(await confirmBox(msg, { ok: 'حذف نهائي', danger: true, title: 'حذف المستند' }))) return;
-    store.deleteDoc(d.id);
+    try { store.deleteDoc(d.id); } catch (e) { toast(e.message, 'err'); return; }
     toast('تم الحذف');
     go('#/' + SEG[type]);
   };
+  const cancel = $('[data-cancel]', root);
+  if (cancel) cancel.onclick = async () => {
+    const cn = await cancelDialog(d);
+    if (!cn) return;
+    try { store.saveDoc(cn); } catch (e) { if (handleDemoError(e)) return; toast(e.message, 'err'); return; }
+    toast(`أُلغيت الفاتورة ${no} ✓ وصدر الإشعار الدائن ${docNo(cn, s)}`);
+    go(docHref(cn));
+  };
+}
+
+// إلغاء فاتورة مبيعات: لا تُحذف، بل يصدر لها إشعار دائن كامل يعكس المبيعات والضريبة ويرجّع المخزون
+function cancelDialog(inv) {
+  const db = store.getDb();
+  const s = S();
+  const prior = db.docs.some((x) => x.type === 'sreturn' && x.refId === inv.id);
+  const pays = paymentList(inv).filter((p) => num(p.amount) > 0);
+  const paid = round(pays.reduce((t, p) => t + num(p.amount), 0), dec());
+  return modal({
+    title: `🚫 إلغاء الفاتورة ${docNo(inv, s)}`,
+    body: html`<form class="form-grid" novalidate>
+      <p class="dlg-msg span-all">الفاتورة الصادرة لا تُحذف: تبقى برقمها في السجل، ويصدر لها <b>إشعار دائن</b> برقمه يعكس المبيعات والضريبة ويرجّع البضاعة للمخزون.</p>
+      <div>${field('تاريخ الإلغاء', html`<input class="inp" type="date" name="date" value="${today()}" min="${inv.date}">`)}<small class="fld-e" data-err="date" hidden></small></div>
+      ${field('السبب (اختياري)', html`<input class="inp" name="reason" maxlength="120" placeholder="مثلاً: خطأ بالسعر" autofocus>`)}
+      ${!inv.party ? html`<p class="muted small span-all">الفاتورة بلا عميل مسجّل، فيُردّ مبلغها كاملاً (${money(paid, { sym: true })}) بنفس طرق الدفع.</p>`
+        : paid > 0 && !prior ? html`<div class="span-all">${field(`ردّ المبلغ المدفوع (${money(paid, { sym: true })}) للعميل من`, html`<select class="inp" name="refund">${moneyOptions(pays[0].acc, { blank: 'لا ردّ نقدي: يبقى رصيداً للعميل' })}</select>`)}</div>`
+          : ''}
+      <div class="dlg-actions span-all"><button class="btn btn-danger">إلغاء الفاتورة</button><button type="button" class="btn btn-ghost" data-no>تراجع</button></div></form>`,
+    onMount: (dlg, done) => {
+      const f = $('form', dlg);
+      $('[data-no]', dlg).onclick = () => done(null);
+      f.onsubmit = (e) => {
+        e.preventDefault();
+        if (!f.date.value || f.date.value < inv.date) { showErrors(f, { date: f.date.value ? 'تاريخ الإلغاء قبل تاريخ الفاتورة' : 'اختر التاريخ' }); return; }
+        const cn = cancelCreditNote(db, inv, { date: f.date.value, reason: f.reason.value.trim(), refund: f.refund && f.refund.value ? { acc: f.refund.value } : null });
+        if (!cn.lines.length) { toast('لا يوجد ما يُلغى: أُرجعت كل بنود الفاتورة مسبقاً', 'err'); return; }
+        const errs = validateDoc(db, cn);
+        if (errs.date) { showErrors(f, { date: errs.date }); return; }
+        const first = Object.values(errs)[0];
+        if (first) { toast(first, 'err'); return; }
+        done(cn);
+      };
+    },
+  });
 }

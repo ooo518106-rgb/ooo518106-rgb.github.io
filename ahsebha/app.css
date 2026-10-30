@@ -266,6 +266,7 @@ textarea.inp { min-height: 76px; resize: vertical; line-height: 1.6; }
 .c-idx { color: var(--text-muted); font-size: .8rem; text-align: center; }
 .c-tot { text-align: end; font-weight: 800; white-space: nowrap; }
 .c-sub { display: block; font-size: .75rem; color: var(--text-muted); margin-top: 2px; }
+.c-desc .fld-e { display: block; margin-top: 2px; }
 .adj-line { display: grid; grid-template-columns: minmax(170px, 2.2fr) minmax(70px, .7fr) minmax(96px, .9fr) minmax(96px, .9fr) minmax(104px, 1fr) 36px; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .adj-line .inp { min-height: 36px; padding: 6px 9px; }
 .adj-line:last-child { border-bottom: 0; }

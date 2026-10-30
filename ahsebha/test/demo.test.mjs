@@ -216,7 +216,9 @@ test('حفظ الفواتير: store.saveDoc يرفض بعد الحد، والت
   // تعديل فاتورة موجودة لا يُحسب
   const edited = store.saveDoc({ ...first, notes: 'تعديل' });
   assert.equal(edited.notes, 'تعديل');
-  // الحذف لا يُرجع الحصة، وحذف كل البيانات واستيراد شركة جديدة لا يصفّر العدّاد
+  // الحذف لا يُرجع الحصة (والفاتورة الصادرة لا تُحذف أصلاً إلا بإذن المالك)، وحذف كل البيانات واستيراد شركة جديدة لا يصفّر العدّاد
+  assert.throws(() => store.deleteDoc(first.id), /لا تُحذف/);
+  store.saveSettings({ allowDeleteInvoices: true });
   store.deleteDoc(first.id);
   assert.throws(() => store.saveDoc(sale()), (e) => e.code === 'DEMO_LIMIT');
   fresh();

@@ -31,8 +31,10 @@ const localDay = (iso) => { const t = new Date(iso); return Number.isNaN(t.getTi
 function salesOf(db, B, from, to) {
   const dec = B.dec;
   const R = (x) => round(x, dec);
-  const docs = (db.docs || []).filter((d) => d.type === 'sale' && inRange(d.date, from, to));
-  const rets = (db.docs || []).filter((d) => d.type === 'sreturn' && inRange(d.date, from, to));
+  // الفاتورة الملغاة بإشعار دائن وإشعارها لا يُعدّان مبيعة ومرتجعاً في الملخص (صافيهما صفر)
+  const voided = new Set(B.cancelled ? [...B.cancelled.keys(), ...B.cancelled.values()] : []);
+  const docs = (db.docs || []).filter((d) => d.type === 'sale' && inRange(d.date, from, to) && !voided.has(d.id));
+  const rets = (db.docs || []).filter((d) => d.type === 'sreturn' && inRange(d.date, from, to) && !voided.has(d.id));
   const totalOf = (d) => (B.totals.get(d.id) || { total: 0 }).total;
   const gross = R(docs.reduce((s, d) => s + totalOf(d), 0));
   const returns = R(rets.reduce((s, d) => s + totalOf(d), 0));
