@@ -1,5 +1,7 @@
 // ═══ صفحة تحميل تطبيق اللابتوب: تقترح الملف المناسب لجهازك وتشرح التحذير الذي يظهر أول مرة ═══
 import { DOWNLOADS, detectOS, downloadUrl, releasesUrl, forOS } from './downloads.js';
+import { CONFIG } from './plans.js';
+import { trialOn, contactLink, invoicesText, previewing } from './license.js';
 import { html } from './ui.js';
 
 const root = document.getElementById('download');
@@ -20,6 +22,25 @@ function hero() {
       ? html`<div class="actions" style="justify-content:center" data-primary>${mine.map((d, i) => btn(d, i === 0))}</div>
         <p class="muted small" style="margin-top:10px">${os === 'mac' ? 'اختر حسب معالج جهازك (الشرح بالأسفل). ' : ''}الملف من صفحة الإصدارات الرسمية للبرنامج.</p>`
       : html`<div class="actions" style="justify-content:center"><a class="btn btn-primary" href="${releasesUrl}" rel="noopener">⬇️ كل التحميلات</a></div>`}
+  </section>`;
+}
+
+// نسخة العرض: تظهر للزوار حين يفعّلها المالك، ولجهاز المالك وحده في المعاينة
+function demo() {
+  if (!trialOn()) return '';
+  const wa = contactLink('السلام عليكم، جرّبت نسخة العرض من برنامج احسبها وأريد كود الاشتراك.');
+  const days = CONFIG.demoDays > 0 ? `خلال ${CONFIG.demoDays} يوماً` : 'بلا حد زمني';
+  return html`<section class="sales-sec demo-sec" id="demo" data-demo-section>
+    ${CONFIG.demoPublic && wa ? '' : html`<p class="note note-warn" data-demo-preview>🚧 <b>معاينة:</b> ${CONFIG.demoPublic ? '' : 'نسخة العرض غير معلنة بعد للزوار، وتظهر لك لأنك شغّلتها على هذا الجهاز من لوحة المالك. '}${wa ? '' : 'وينقصها رقم واتساب البيع (whatsapp في plans.js) ليظهر زر «أريد كود الاشتراك».'}</p>`}
+    <div class="sec-head"><h2>🧪 جرّب قبل أن تشترك</h2>
+      <p class="muted">نزّل التطبيق وجرّبه مجاناً بكل ميزاته: <b>${invoicesText(CONFIG.demoInvoices)}</b> ${days}. الفواتير في نسخة العرض تحمل علامة «نسخة تجريبية» ولا تصلح للعمل الفعلي.</p></div>
+    <ol class="steps">
+      <li><b>نزّل التطبيق</b><span>اختر ملف جهازك من الأعلى وثبّته. يعمل مباشرة كنسخة عرض.</span></li>
+      <li><b>جرّبه</b><span>أضف عملاءك ومنتجاتك وأنشئ فواتيرك حتى حد نسخة العرض.</span></li>
+      <li><b>فعّل اشتراكك</b><span>إذا أعجبك، تواصل معنا فنرسل لك كود التفعيل. الصقه في «اشتراكي» داخل التطبيق فيصير اشتراكاً كاملاً على نفس التطبيق وبياناتك كما هي.</span></li></ol>
+    <div class="actions" style="justify-content:center;margin-top:14px">
+      ${wa ? html`<a class="btn btn-primary" href="${wa}" target="_blank" rel="noopener" data-demo-wa>💬 أعجبني، أريد كود الاشتراك</a>` : ''}
+      ${CONFIG.published || previewing() ? html`<a class="btn ${wa ? 'btn-ghost' : 'btn-primary'}" href="plans.html">💳 الباقات والأسعار</a>` : ''}</div>
   </section>`;
 }
 
@@ -55,7 +76,7 @@ const notes = () => html`<section class="sales-sec"><div class="sec-head"><h2>م
   </ul></section>`;
 
 function render() {
-  root.innerHTML = String(html`${hero()}${all()}${steps()}${notes()}`);
+  root.innerHTML = String(html`${hero()}${demo()}${all()}${steps()}${notes()}`);
 }
 
 document.getElementById('theme').onclick = () => {

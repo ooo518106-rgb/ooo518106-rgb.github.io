@@ -46,6 +46,8 @@ function waNumber(phone) {
 }
 const waUrl = (phone, text) => `https://wa.me/${waNumber(phone)}?text=${encodeURIComponent(text)}`;
 const latest = (c) => c.licenses[c.licenses.length - 1] || null;
+// آخر اشتراك حقيقي (بدون أكواد العرض): هو الذي يُبنى عليه التجديد والتعديل
+const latestSub = (c) => [...c.licenses].reverse().find((l) => !l.payload.n) || null;
 const planName = (p) => (PLANS[p] && PLANS[p].name) || 'مخصّصة';
 const DAYS = ['يوم', 'يومان', 'أيام', 'يوماً'];
 const daysText = (n) => (n === 0 ? 'اليوم' : n === 1 ? DAYS[0] : n === 2 ? DAYS[1] : n <= 10 ? `${n} ${DAYS[2]}` : `${n} ${DAYS[3]}`);
@@ -55,6 +57,8 @@ function standing(c) {
   const l = latest(c);
   if (!l) return { key: 'none', label: 'بدون اشتراك', cls: 'muted', rank: 5 };
   const e = lic.entitlementOf(l.payload, today(), CONFIG.graceDays);
+  // كود عرض: فرصة بيع تحتاج متابعة، ولا تُحسب اشتراكاً فعّالاً
+  if (l.payload.n) return e.status === 'expired' ? { key: 'demo-over', label: 'انتهى العرض', cls: 'warn', rank: 1, e } : { key: 'demo', label: e.daysLeft == null ? 'نسخة عرض' : e.daysLeft === 0 ? 'عرض ينتهي اليوم' : `نسخة عرض · باقي ${daysText(e.daysLeft)}`, cls: 'info', rank: 1, e };
   if (e.status === 'lifetime') return { key: 'lifetime', label: 'دائم', cls: 'info', rank: 4, e };
   if (e.status === 'active') return e.daysLeft <= 7 ? { key: 'soon', label: e.daysLeft === 0 ? 'ينتهي اليوم' : `ينتهي بعد ${daysText(e.daysLeft)}`, cls: 'warn', rank: 1, e } : { key: 'active', label: 'فعّال', cls: 'ok', rank: 3, e };
   if (e.status === 'grace') return { key: 'grace', label: 'في المهلة', cls: 'warn', rank: 0, e };
@@ -63,9 +67,12 @@ function standing(c) {
 
 function issueMessage(c, rec) {
   const p = rec.payload;
+  if (p.n) return `السلام عليكم ${c.name} 👋\nهذه نسخة عرض من برنامج احسبها لتجربته: ${lic.invoicesText(p.n)} خلال ${daysText(daysBetween(p.i, p.e))} وكل الميزات مفتوحة للتجربة.\nلتفعيلها اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nوإذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك الكامل، وبتكمل على نفس بياناتك 🙏`;
   return `السلام عليكم ${c.name} 👋\nتم تفعيل اشتراكك في برنامج احسبها — باقة ${planName(p.p)}${p.e ? ` حتى ${fmtDate(p.e)}` : ' (اشتراك دائم)'}.\nلتفعيله اضغط الرابط التالي من جهازك (أو الصق الكود في: اشتراكي ← تفعيل كود الاشتراك):\n${lic.activationLink(rec.code)}\nشكراً لثقتك 🙏`;
 }
 function reminderMessage(c, st) {
+  if (st.key === 'demo-over') return `السلام عليكم ${c.name} 👋\nانتهت نسخة العرض من برنامج احسبها. إذا عجبك البرنامج ردّ علينا وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
+  if (st.key === 'demo') return `السلام عليكم ${c.name} 👋\nكيف شفت نسخة العرض من برنامج احسبها؟ إذا عجبك أو عندك أي سؤال ردّ علينا، وبنرسل لك كود الاشتراك لتكمل على نفس بياناتك 🙏`;
   const when = st.key === 'expired' || st.key === 'grace' ? `انتهى بتاريخ ${fmtDate(st.e.exp)}` : `ينتهي بتاريخ ${fmtDate(st.e.exp)}`;
   return `السلام عليكم ${c.name} 👋\nنذكّرك أن اشتراكك في برنامج احسبها ${when}. للتجديد ردّ علينا هنا وسنرسل لك كود التجديد فوراً. شكراً لك 🙏`;
 }
@@ -177,14 +184,16 @@ function drawList() {
   box.innerHTML = rows.length ? String(html`${rows.map(({ c, s }) => {
     const l = latest(c);
     const e = s.e;
+    const isDemo = !!(l && l.payload.n);
     return html`<div class="cust" data-cust="${c.id}">
       <div class="cust-main"><div class="cust-name"><b>${c.name}</b> <span class="badge badge-${s.cls}">${s.label}</span></div>
-        <div class="muted small">${[c.phone ? html`<span dir="ltr">${c.phone}</span>` : '', e ? `${planName(l.payload.p)}${e.exp ? ' · حتى ' + fmtDate(e.exp) : ' · دائم'}` : 'لم يُصدر له اشتراك بعد', l ? `${resolved(l).size} ميزة` : ''].filter(Boolean).map((x, i) => html`${i ? ' · ' : ''}${x}`)}</div>
+        <div class="muted small">${[c.phone ? html`<span dir="ltr">${c.phone}</span>` : '', e ? (isDemo ? `نسخة عرض · ${lic.invoicesText(l.payload.n)}${e.exp ? ' · حتى ' + fmtDate(e.exp) : ''}` : `${planName(l.payload.p)}${e.exp ? ' · حتى ' + fmtDate(e.exp) : ' · دائم'}`) : 'لم يُصدر له اشتراك بعد', l && !isDemo ? `${resolved(l).size} ميزة` : ''].filter(Boolean).map((x, i) => html`${i ? ' · ' : ''}${x}`)}</div>
         ${c.notes ? html`<div class="muted small">📝 ${c.notes}</div>` : ''}</div>
       <div class="cust-acts">
-        <button class="btn btn-primary btn-sm" data-act="issue" data-id="${c.id}">🎫 ${l ? 'تجديد / تعديل' : 'إصدار اشتراك'}</button>
+        <button class="btn btn-primary btn-sm" data-act="issue" data-id="${c.id}">🎫 ${l && !isDemo ? 'تجديد / تعديل' : 'إصدار اشتراك'}</button>
+        ${!l || isDemo ? html`<button class="btn btn-ghost btn-sm" data-act="demo" data-id="${c.id}">🧪 نسخة عرض</button>` : ''}
         ${l ? html`<button class="btn btn-ghost btn-sm" data-act="code" data-id="${c.id}">📋 الكود</button>` : ''}
-        ${l && (s.key === 'soon' || s.key === 'grace' || s.key === 'expired') ? html`<button class="btn btn-ghost btn-sm" data-act="remind" data-id="${c.id}">💬 تذكير</button>` : ''}
+        ${l && (s.key === 'soon' || s.key === 'grace' || s.key === 'expired' || isDemo) ? html`<button class="btn btn-ghost btn-sm" data-act="remind" data-id="${c.id}">💬 ${isDemo ? 'متابعة' : 'تذكير'}</button>` : ''}
         <button class="btn btn-ghost btn-sm" data-act="edit-customer" data-id="${c.id}" aria-label="تعديل بيانات ${c.name}">✏️</button>
         <button class="btn btn-ghost btn-sm" data-act="del-customer" data-id="${c.id}" aria-label="حذف ${c.name}">🗑️</button></div></div>`;
   })}`) : String(html`<p class="muted" style="padding:14px 4px">لا نتائج مطابقة.</p>`);
@@ -223,7 +232,7 @@ const DURS = [['1', 'شهر'], ['3', '3 أشهر'], ['6', '6 أشهر'], ['12', 
 
 async function issueDialog(c) {
   if (!(await ensureKeys())) return;
-  const cur = latest(c);
+  const cur = latestSub(c); // أكواد العرض لا تُبنى عليها اشتراكات (لا تمديد ولا ميزات سابقة)
   const curEnt = cur ? lic.entitlementOf(cur.payload, today(), CONFIG.graceDays) : null;
   const curAlive = !!curEnt && (curEnt.status === 'active' || curEnt.status === 'lifetime');
   const plans = Object.values(PLANS).filter((p) => p.id !== 'free');
@@ -302,10 +311,77 @@ async function issueDialog(c) {
   render();
 }
 
+// ─── إصدار كود «نسخة عرض»: كل الميزات للتجربة بعدد فواتير ومدة محدودين ───
+async function demoDialog(c) {
+  if (!(await ensureKeys())) return;
+  const n0 = CONFIG.demoInvoices > 0 ? CONFIG.demoInvoices : 10;
+  const d0 = CONFIG.demoDays > 0 ? CONFIG.demoDays : 14;
+  await modal({
+    title: `🧪 نسخة عرض لـ ${c.name}`,
+    body: html`<form novalidate data-form="demo" class="stack">
+      <p class="note note-info">كل الميزات مفتوحة له للتجربة، لكن بعدد فواتير ومدة محدودين، وتظهر على فواتيره علامة «نسخة تجريبية» فلا يستفيد منها فعلياً. عندما يعجبه البرنامج أصدر له اشتراكاً كاملاً (زر «إصدار اشتراك») فيكمل على نفس بياناته.</p>
+      <div class="form-grid">
+        ${field('عدد الفواتير', html`<input class="inp" name="n" type="text" inputmode="numeric" dir="ltr" value="${n0}" maxlength="3" autofocus>`, { hint: 'مبيعات ومشتريات، بما فيها الكاشير' })}
+        ${field('المدة بالأيام', html`<input class="inp" name="days" type="text" inputmode="numeric" dir="ltr" value="${d0}" maxlength="3">`, { hint: 'تبدأ من اليوم' })}
+        ${field('كود الجهاز (اختياري)', html`<input class="inp" name="device" dir="ltr" placeholder="مثال: K7M2-9QX4" maxlength="20" autocomplete="off">`, { hint: 'اتركه فارغاً ليعمل على أي جهاز' })}
+      </div>
+      <p class="muted small" data-preview></p>
+      <small class="fld-e" data-err hidden></small>
+      <div class="dlg-actions"><button class="btn btn-primary">إصدار كود العرض</button><button type="button" class="btn btn-ghost" data-no>إلغاء</button></div></form>`,
+    onMount: (dlg, done) => {
+      const f = $('form', dlg);
+      $('[data-no]', dlg).onclick = () => done(null);
+      const num = (v) => parseInt(latin(v).replace(/\D/g, ''), 10) || 0;
+      const refresh = () => {
+        const days = num(f.days.value);
+        $('[data-preview]', f).textContent = days >= 1 && days <= 365 ? `ينتهي في ${fmtDate(addDays(today(), days))}.` : '';
+        $('[data-err]', f).hidden = true;
+      };
+      f.addEventListener('input', refresh);
+      refresh();
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const err = $('[data-err]', f);
+        err.hidden = true;
+        const fail = (m) => { err.textContent = m; err.hidden = false; };
+        const n = num(f.n.value);
+        const days = num(f.days.value);
+        if (n < 1 || n > 999) return fail('عدد الفواتير من 1 إلى 999.');
+        if (days < 1 || days > 365) return fail('المدة من 1 إلى 365 يوماً.');
+        const btn = $('.btn-primary', f);
+        btn.disabled = true;
+        try {
+          // الاحترافية = كل الميزات؛ وإن حُذفت من plans.js نكتب الميزات كلها في الكود
+          const all = !!PLANS.pro;
+          const payload = buildPayload({ kid: state.keys.kid, customer: c.name, plan: all ? 'pro' : '', add: all ? [] : FEATURES.map((x) => x.id), issued: today(), exp: addDays(today(), days), device: f.device.value, demo: n });
+          const code = await signLicense(payload, state.keys.privateKey);
+          const rec = { payload, code, at: new Date().toISOString(), paid: 0 };
+          c.licenses.push(rec);
+          save();
+          $('.dlg-head h2', dlg).textContent = '✅ تم إصدار كود العرض';
+          $('.dlg-body', dlg).innerHTML = String(codeView(c, rec, { fresh: true }));
+          bindCodeView(dlg, c, rec, done);
+        } catch (ex) { btn.disabled = false; fail(ex.message || 'تعذّر إصدار الكود'); }
+      };
+    },
+  });
+  render();
+}
+
 // عرض الكود: نسخ ورابط وإرسال واتساب
 function codeView(c, rec, { fresh = false } = {}) {
   const p = rec.payload;
   const feats = [...lic.resolveFeatures(p)].length;
+  if (p.n) {
+    return html`${fresh ? html`<p class="dlg-msg">كود <b>نسخة عرض</b> للزبون <b>${c.name}</b> — ${lic.invoicesText(p.n)} حتى ${fmtDate(p.e)}${p.d ? html` · مربوط بالجهاز <span dir="ltr">${p.d}</span>` : ''}.</p>` : html`<p class="muted small">نسخة عرض صدرت بتاريخ ${fmtDate(p.i)} · ${lic.invoicesText(p.n)} · حتى ${fmtDate(p.e)}</p>`}
+      <label class="fld" style="margin-top:10px"><span class="fld-l">كود نسخة العرض</span><textarea class="inp code-box" readonly rows="5" dir="ltr" data-code>${rec.code}</textarea></label>
+      <div class="dlg-actions">
+        <a class="btn btn-primary" data-wa href="${waUrl(c.phone, issueMessage(c, rec))}" target="_blank" rel="noopener">💬 أرسل للزبون عبر واتساب</a>
+        <button type="button" class="btn btn-ghost" data-copy="code">📋 نسخ الكود</button>
+        <button type="button" class="btn btn-ghost" data-copy="link">🔗 نسخ رابط التفعيل</button>
+        <button type="button" class="btn btn-ghost" data-no>تم</button></div>
+      ${c.phone ? '' : html`<p class="muted small" style="margin-top:8px">لم تُدخل رقم واتساب لهذا الزبون، فسيفتح واتساب لتختار جهة الاتصال بنفسك.</p>`}`;
+  }
   return html`${fresh ? html`<p class="dlg-msg">اشتراك <b>${planName(p.p)}</b> للزبون <b>${c.name}</b> — ${feats} ميزة ${p.e ? 'حتى ' + fmtDate(p.e) : '(دائم)'}${p.d ? html` · مربوط بالجهاز <span dir="ltr">${p.d}</span>` : ''}.</p>` : html`<p class="muted small">صدر بتاريخ ${fmtDate(p.i)} · ${planName(p.p)} · ${feats} ميزة ${p.e ? '· حتى ' + fmtDate(p.e) : '· دائم'}</p>`}
     <label class="fld" style="margin-top:10px"><span class="fld-l">كود الاشتراك</span><textarea class="inp code-box" readonly rows="5" dir="ltr" data-code>${rec.code}</textarea></label>
     <div class="dlg-actions">
@@ -399,6 +475,10 @@ function toolsTab() {
       <p class="muted small">يطبّق الاشتراكات على هذا الجهاز فقط (الباقي من الزبائن لا يتأثر)، فترى الميزات المقفلة وصفحة الاشتراك كما يراها الزبون، وتجرب تفعيل كود حقيقي.</p>
       <label class="check" style="margin-top:10px"><input type="checkbox" data-preview ${lic.previewing() ? raw('checked') : ''}><span>تطبيق الاشتراكات على هذا الجهاز للمعاينة</span></label>
       <div class="actions" style="margin-top:10px"><a class="btn btn-ghost" href="./" target="_blank" rel="noopener">افتح البرنامج ↗</a><a class="btn btn-ghost" href="plans.html" target="_blank" rel="noopener">صفحة الأسعار ↗</a></div></div>
+    <div class="card" style="margin-top:14px" data-tool="demo"><div class="card-h"><h3>🧪 نسخة العرض</h3><span class="badge badge-${CONFIG.demoPublic ? 'warn' : 'muted'}" data-demo-public="${String(!!CONFIG.demoPublic)}">${CONFIG.demoPublic ? 'مفعّلة للجميع' : 'مطفّأة للجميع'}</span></div>
+      <p class="muted small">نسخة تجريبية بـ ${lic.invoicesText(CONFIG.demoInvoices)}${CONFIG.demoDays > 0 ? ` و${daysText(CONFIG.demoDays)}` : ' وبلا حد زمني'} وكل الميزات مفتوحة. حين تفعّلها للجميع (<span dir="ltr">demoPublic</span> في ملف <span dir="ltr">plans.js</span>) تعمل بها كل نسخة بلا كود اشتراك، ويحوّلها كود الاشتراك الذي ترسله لاشتراك كامل بنفس البيانات. وأكواد العرض التي تصدرها من زر «نسخة عرض» بجانب كل زبون تعمل دائماً.</p>
+      <label class="check" style="margin-top:10px"><input type="checkbox" data-demo-preview ${lic.demoPreviewing() ? raw('checked') : ''}><span>تشغيل نسخة العرض على هذا الجهاز فقط للتجربة</span></label>
+      <div class="actions" style="margin-top:10px"><a class="btn btn-ghost" href="./" target="_blank" rel="noopener">افتح البرنامج ↗</a><a class="btn btn-ghost" href="download.html" target="_blank" rel="noopener">صفحة التنزيل ↗</a></div></div>
     <div class="card" style="margin-top:14px" data-tool="test"><div class="card-h"><h3>🔍 افحص كوداً</h3></div>
       <p class="muted small">الصق كوداً وصلك من زبون لترى ما بداخله وهل توقيعه سليم.</p>
       <form novalidate data-form="test" class="stack" style="margin-top:10px"><textarea class="inp code-box" name="code" rows="3" dir="ltr" placeholder="AHS1.…" spellcheck="false"></textarea>
@@ -416,7 +496,7 @@ async function testCode(raw0) {
   const names = [...lic.resolveFeatures(p.payload)].map((id) => (FEATURES.find((f) => f.id === id) || {}).name).filter(Boolean);
   const stText = { lifetime: 'دائم', active: `فعّال (باقي ${daysText(e.daysLeft)})`, grace: 'في المهلة', expired: 'منتهي' }[e.status];
   out.innerHTML = String(html`<p class="note ${v.ok ? 'note-ok' : 'note-bad'}">${v.ok ? '✅ التوقيع سليم: الكود صدر من مفتاحك.' : '❌ التوقيع غير موثّق' + (keys.length ? ': ليس من مفتاحك.' : ': لا مفتاح لديك للمقارنة.')}</p>
-    <ul class="test-list"><li><b>الزبون:</b> ${p.payload.c || '—'}</li><li><b>الباقة:</b> ${planName(p.payload.p)}</li><li><b>الحالة:</b> ${stText}</li>
+    <ul class="test-list"><li><b>الزبون:</b> ${p.payload.c || '—'}</li>${p.payload.n ? html`<li><b>النوع:</b> نسخة عرض (${lic.invoicesText(p.payload.n)})</li>` : html`<li><b>الباقة:</b> ${planName(p.payload.p)}</li>`}<li><b>الحالة:</b> ${stText}</li>
       <li><b>صدر:</b> ${fmtDate(p.payload.i)} · <b>ينتهي:</b> ${p.payload.e ? fmtDate(p.payload.e) : 'دائم'}</li>
       <li><b>كود الجهاز:</b> ${p.payload.d ? html`<span dir="ltr">${p.payload.d}</span>` : 'أي جهاز'}</li>
       <li><b>الميزات (${names.length}):</b> ${names.join('، ') || '—'}</li></ul>`);
@@ -439,6 +519,7 @@ root.addEventListener('click', async (e) => {
       }
       break;
     case 'issue': if (cust) await issueDialog(cust); break;
+    case 'demo': if (cust) await demoDialog(cust); break;
     case 'code': if (cust) await showCode(cust); break;
     case 'remind': { const s = cust && standing(cust); if (s && s.e) window.open(waUrl(cust.phone, reminderMessage(cust, s)), '_blank', 'noopener'); break; }
     case 'unlock': if (await unlockDialog()) render(); break;
@@ -493,6 +574,7 @@ root.addEventListener('input', (e) => {
 root.addEventListener('change', async (e) => {
   if (e.target.matches('[data-key-file]')) { const f = e.target.files[0]; e.target.value = ''; if (f) await keyFileImport(f); return; }
   if (e.target.matches('[data-preview]')) { lic.setPreview(e.target.checked); toast(e.target.checked ? 'تُطبَّق الاشتراكات على هذا الجهاز للمعاينة' : 'عاد هذا الجهاز لوضعه العادي'); return; }
+  if (e.target.matches('[data-demo-preview]')) { lic.setDemoPreview(e.target.checked); toast(e.target.checked ? 'يعمل البرنامج على هذا الجهاز كنسخة عرض' : 'عاد هذا الجهاز لوضعه العادي'); return; }
   if (e.target.matches('[data-import]')) {
     const file = e.target.files[0];
     e.target.value = '';

@@ -24,9 +24,11 @@ export function newLicenseId(len = 10) {
 }
 
 // حمولة الاشتراك: الباقة + ميزات مضافة ومحذوفة + التواريخ (+ كود جهاز اختياري)
-export function buildPayload({ kid, customer = '', plan = '', add = [], remove = [], issued, exp = '', device = '', id = newLicenseId() }) {
-  const p = cleanPayload({ v: 1, id, k: kid, c: String(customer).trim().slice(0, 80), p: plan, a: add, r: remove, i: issued, e: exp, d: String(device).trim().toUpperCase() });
+// demo = عدد فواتير نسخة العرض (0 = اشتراك عادي). رقم غير صالح يرفض الإصدار بدل أن يصدر اشتراكاً كاملاً بالخطأ
+export function buildPayload({ kid, customer = '', plan = '', add = [], remove = [], issued, exp = '', device = '', demo = 0, id = newLicenseId() }) {
+  const p = cleanPayload({ v: 1, id, k: kid, c: String(customer).trim().slice(0, 80), p: plan, a: add, r: remove, i: issued, e: exp, d: String(device).trim().toUpperCase(), n: demo });
   if (!p) throw new Error('بيانات الاشتراك غير صالحة (راجع التواريخ وكود الجهاز)');
+  if (demo !== 0 && demo != null && p.n !== demo) throw new Error('عدد فواتير نسخة العرض غير صالح (من 1 إلى 999)');
   return p;
 }
 

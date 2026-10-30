@@ -139,7 +139,7 @@ const NAV = [
 // عناصر القائمة المسموحة للمستخدم الحالي، بدون عناوين أقسام فارغة
 function navItems() {
   const db = store.getDb();
-  const xs = NAV.filter((n) => n.sec || (auth.can(auth.routePerm(n.h)) && (n.need !== 'wh' || (db && db.warehouses.length)) && (n.need !== 'sub' || license.enforcing()) && (CONFIG.showLockedInNav || !license.lockedFeature(n.h))));
+  const xs = NAV.filter((n) => n.sec || (auth.can(auth.routePerm(n.h)) && (n.need !== 'wh' || (db && db.warehouses.length)) && (n.need !== 'sub' || license.enforcing() || !!license.demo()) && (CONFIG.showLockedInNav || !license.lockedFeature(n.h))));
   return xs.filter((n, i) => !n.sec || (xs[i + 1] && !xs[i + 1].sec));
 }
 
@@ -179,11 +179,19 @@ export function renderShell() {
     a.hidden = !auth.can(auth.routePerm(a.getAttribute('href'))) || !!(f && !license.has(f));
   });
   quick.hidden = !db || !quick.querySelector('.quick-menu a:not([hidden])');
+  renderDemoBar();
   const u = auth.currentUser();
   const lockBtn = document.getElementById('lock-btn');
   lockBtn.hidden = !auth.usersEnabled();
   lockBtn.innerHTML = String(html`🔒<span class="hide-sm">${u ? ' ' + u.name : ''}</span>`);
   markNav();
+}
+
+// شريط نسخة العرض أعلى الصفحات (يختفي إن لم تكن هذه النسخة نسخة عرض أو لم تُنشأ المنشأة بعد)
+function renderDemoBar() {
+  const bar = document.getElementById('demo-bar');
+  if (!store.getDb()) { if (bar) bar.hidden = true; return; }
+  subscription.demoBar(bar);
 }
 
 function markNav() {
@@ -229,6 +237,9 @@ async function render() {
     root.innerHTML = String(html`<div class="empty"><div class="empty-ic">🔒</div><h3>لا تملك صلاحية لهذه الصفحة</h3><p>اطلب من المالك تعديل صلاحياتك من صفحة المستخدمين.</p><p><a href="${auth.homePath()}">العودة</a></p></div>`);
     return;
   }
+  // نسخة العرض وصلت حدها: بدل نموذج فاتورة جديدة أو شاشة الكاشير تظهر صفحة تشرح وتعرض التفعيل
+  // (قبل صفحة القفل: الكاشير والمشتريات تُقفلان أيضاً بعد انتهاء العرض، والسبب الحقيقي هو انتهاؤه)
+  if (db && r && subscription.demoBlocksRoute(path)) { subscription.demoLimitPage(root); return; }
   const locked = db && r ? license.lockedFeature(path) : null;
   if (locked) { subscription.lockedPage(root, locked); return; }
   if (!r) {
@@ -285,7 +296,9 @@ async function boot() {
   store.gcFiles().catch(() => {});
   window.addEventListener('hashchange', render);
   // تفعيل اشتراك من نافذة أخرى
-  window.addEventListener('storage', (e) => { if (e.key === 'ahsebha-license' || e.key === 'ahsebha-preview') license.init().then(() => { renderShell(); if (!guard.dirty) rerender(); }).catch(() => {}); });
+  window.addEventListener('storage', (e) => { if (e.key === 'ahsebha-license' || e.key === 'ahsebha-preview' || e.key === 'ahsebha-demo-preview') license.init().then(() => { renderShell(); if (!guard.dirty) rerender(); }).catch(() => {}); else if (e.key === 'ahsebha-demo-used') renderDemoBar(); });
+  // بعد كل فاتورة جديدة في نسخة العرض يتحدّث الشريط (والقائمة إن كان الاشتراك سيُقفل شيئاً)
+  window.addEventListener('acc:demo', renderDemoBar);
   window.addEventListener('beforeunload', (e) => { if (guard.dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('acc:shell', () => { auth.init(); renderShell(); });
   window.addEventListener('acc:save-failed', () => toast('تعذّر الحفظ على هذا الجهاز. صدّر نسخة احتياطية من الإعدادات فوراً', 'err'));

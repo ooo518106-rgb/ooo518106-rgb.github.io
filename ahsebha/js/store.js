@@ -1,5 +1,6 @@
 // ═══ التخزين: كل البيانات على جهاز المستخدم (IndexedDB، وبديله localStorage) ═══
 import { SCHEMA, defaultAccounts, defaultSettings, buildBooks, validateDoc, isLockedDate, docAmount, currencyInfo, ymd, addDays, addMonths, monthStart, monthEnd, daysBetween, isDate } from './core.js';
+import { docGate, docCreated, demoError } from './license.js';
 
 const APP_ID = 'ahsebha-accounting';
 const IDB_NAME = 'ahsebha-accounting';
@@ -234,6 +235,8 @@ export function saveDoc(doc) {
   const old = doc.id ? db.docs.find((x) => x.id === doc.id) : null;
   assertOpen(old);
   assertOpen(doc);
+  // نسخة العرض: الحماية الأخيرة لحد الفواتير (التعديل على فاتورة موجودة لا يُحسب)
+  if (!old) { const g = docGate(doc.type); if (g) throw demoError(g); }
   mutate((d) => {
     const i = doc.id ? d.docs.findIndex((x) => x.id === doc.id) : -1;
     if (i >= 0) {
@@ -252,6 +255,7 @@ export function saveDoc(doc) {
     d.docs.push(doc);
     audit(d, 'create', doc);
   });
+  if (!old) docCreated(doc.type);
   return doc;
 }
 
@@ -411,7 +415,12 @@ export function runRecurring(today = ymd(new Date()), { only } = {}) {
       const errs = validateDoc(db, doc);
       const msg = Object.values(errs)[0];
       if (msg) { patchRecurring(r, { error: msg }); out.errors.push({ r, msg }); break; }
-      saveDoc(doc);
+      try { saveDoc(doc); } catch (e) {
+        // نسخة العرض وصلت حدها: لا يُنشأ المستند ويبقى موعده محفوظاً حتى يُفعَّل الاشتراك (بدون وسم القالب بخطأ دائم)
+        if (e.code !== 'DEMO_LIMIT') throw e;
+        out.errors.push({ r, msg: e.message });
+        break;
+      }
       out.created.push(doc);
       patchRecurring(r, { count: (r.count || 0) + 1, last: r.next, next: nextRun(r.next, r.freq, r.day), error: '' });
     }

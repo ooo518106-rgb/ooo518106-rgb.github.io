@@ -5,6 +5,8 @@ import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, no
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
 import { can, usersEnabled } from '../auth.js';
+import { docGate, demoError } from '../license.js';
+import { handleDemoError } from './subscription.js';
 
 const HELD_KEY = 'ahsebha-pos-held';
 const newCart = () => ({ lines: [], party: null });
@@ -171,6 +173,9 @@ export function pos({ root }) {
   // ── الدفع ──
   async function checkout(mode) {
     if (!cart.lines.length) return;
+    // نسخة العرض وصلت حدها: لا ندخل في الدفع لنرفض الفاتورة بعده
+    const gate = docGate('sale');
+    if (gate) { handleDemoError(demoError(gate)); return; }
     const T = calc();
     const total = T.total;
     let result = null;
@@ -191,7 +196,7 @@ export function pos({ root }) {
     if (result.tendered) { doc.tendered = result.tendered; doc.change = round(result.tendered - (result.payments.find((p) => p.acc === accs.cash.id)?.amount || 0), dec()); }
     const errs = validateDoc(store.getDb(), doc);
     if (Object.keys(errs).length) { toast(Object.values(errs)[0], 'err'); return; }
-    store.saveDoc(doc);
+    try { store.saveDoc(doc); } catch (e) { if (handleDemoError(e)) return; throw e; }
     toast(`تم البيع ✓ ${docNo(doc, s)}`);
     if (s.posAutoPrint !== false) printPaper(docPaper(doc, { size: s.posPrintSize || 'receipt' }), { size: s.posPrintSize || 'receipt', title: docNo(doc, s) });
     cart = newCart();
