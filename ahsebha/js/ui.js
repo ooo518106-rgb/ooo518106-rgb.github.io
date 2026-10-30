@@ -111,6 +111,31 @@ export function confirmBox(message, { ok = 'تأكيد', danger = false, title =
   }).then((v) => v === true);
 }
 
+// نافذة كلمة سر؛ confirm = تُكتب مرتين (عند التشفير). تُرجع النص أو null عند الإلغاء
+export function askPassword({ title = 'كلمة السر', message = '', ok = 'متابعة', confirm = false, min = 6 } = {}) {
+  return modal({
+    title,
+    body: html`<form class="form-grid" novalidate>
+      ${message ? html`<p class="dlg-msg span-all">${message}</p>` : ''}
+      <div class="span-all"><label class="fld"><span class="fld-l">كلمة السر</span><input class="inp" type="password" name="pw" dir="ltr" autocomplete="${confirm ? 'new-password' : 'current-password'}" autofocus></label><small class="fld-e" data-err="pw" hidden></small></div>
+      ${confirm ? html`<div class="span-all"><label class="fld"><span class="fld-l">أعد كتابتها للتأكد</span><input class="inp" type="password" name="pw2" dir="ltr" autocomplete="new-password"></label><small class="fld-e" data-err="pw2" hidden></small></div>` : ''}
+      <div class="dlg-actions span-all"><button class="btn btn-primary">${ok}</button><button type="button" class="btn btn-ghost" data-no>إلغاء</button></div></form>`,
+    onMount: (dlg, done) => {
+      const f = dlg.querySelector('form');
+      dlg.querySelector('[data-no]').onclick = () => done(null);
+      f.onsubmit = (e) => {
+        e.preventDefault();
+        const errs = {};
+        if (!f.pw.value) errs.pw = 'اكتب كلمة السر';
+        else if (confirm && f.pw.value.length < min) errs.pw = `كلمة السر ${min} خانات على الأقل`;
+        if (confirm && !errs.pw && f.pw.value !== f.pw2.value) errs.pw2 = 'الكلمتان غير متطابقتين';
+        if (!showErrors(f, errs)) return;
+        done(f.pw.value);
+      };
+    },
+  });
+}
+
 // ─── قائمة بحث منسدلة (عملاء، منتجات، حسابات) ───
 // items(): [{ value, label, sub, search }]؛ onPick(item)؛ onCreate(text) يرجّع عنصراً جديداً
 export function combo(input, { items, onPick, onCreate, createLabel = 'إضافة', onType, empty = 'لا توجد نتائج' }) {

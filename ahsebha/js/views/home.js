@@ -2,7 +2,8 @@
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
 import { COUNTRIES, dashboard as summarize, docNo, stockReport, ymd, monthStart, validSaudiVat, isDate, isPdc, addDays } from '../core.js';
-import { html, raw, money, fmtDate, hijri, toast, confirmBox, empty, $, showErrors, field, monthName, badge } from '../ui.js';
+import { html, raw, money, fmtDate, hijri, toast, confirmBox, askPassword, empty, $, showErrors, field, monthName, badge } from '../ui.js';
+import { encryptBytes, decryptBackup, isEncryptedBackup, MIN_PASSWORD } from '../backup-crypto.js';
 import { icon } from '../icons.js';
 import { go, setTitle, docHref } from '../nav.js';
 import { today, S, partyName, docStatus, taxAuth } from './common.js';
@@ -97,7 +98,16 @@ const BACKUP_JSON = 'ahsebha-backup.json';
 export async function restoreFile(file) {
   if (!file) return;
   try {
-    const buf = new Uint8Array(await file.arrayBuffer());
+    let buf = new Uint8Array(await file.arrayBuffer());
+    // نسخة مشفّرة بكلمة سر: نطلب الكلمة ونفك التشفير ثم نكمل كأي نسخة عادية (JSON أو ZIP)
+    if (buf[0] === 0x7b && new TextDecoder().decode(buf.subarray(0, 300)).includes('kenz-encrypted-backup')) {
+      const text = new TextDecoder().decode(buf);
+      if (isEncryptedBackup(text)) {
+        const pw = await askPassword({ title: '🔐 نسخة مشفّرة', message: 'اكتب كلمة السر التي شفّرت بها هذه النسخة.', ok: 'فك التشفير' });
+        if (pw == null) return;
+        buf = (await decryptBackup(text, pw)).bytes;
+      }
+    }
     let entries = null;
     let data;
     if (buf[0] === 0x50 && buf[1] === 0x4b) {
@@ -220,8 +230,24 @@ export function downloadBackup() {
   save(new Blob([store.backupJSON()], { type: 'application/json' }), backupName('نسخة-احتياطية', 'json'));
   toast(store.usedFileIds().size ? 'تم تنزيل البيانات ✓ (بدون المرفقات؛ للمرفقات نزّل النسخة الكاملة من الإعدادات)' : 'تم تنزيل النسخة الاحتياطية ✓ احفظها في مكان آمن');
 }
+// نسخة مشفّرة بكلمة سر (تتطلب كلمة سر عند الاستعادة)، عادية أو كاملة مع المرفقات
+export async function downloadEncryptedBackup({ full = false } = {}) {
+  const pw = await askPassword({
+    title: full ? '🔐 نسخة كاملة مشفّرة بكلمة سر' : '🔐 نسخة مشفّرة بكلمة سر',
+    message: 'ستحتاج كلمة السر عند الاستعادة. إن نسيتها لا يستطيع أحد استرجاع النسخة (لا يوجد باب خلفي)، فاحفظها في مكان آمن.',
+    ok: 'تشفير وتنزيل', confirm: true, min: MIN_PASSWORD,
+  });
+  if (pw == null) return;
+  try {
+    let bytes, kind = 'json', count = 0, missing = 0;
+    if (full) { const b = await buildFullBackup(); bytes = b.bytes; kind = 'zip'; count = b.count; missing = b.missing; } else bytes = new TextEncoder().encode(store.backupJSON());
+    const text = await encryptBytes(bytes, pw, { kind });
+    save(new Blob([text], { type: 'application/json' }), backupName(full ? 'نسخة-كاملة-مشفرة' : 'نسخة-مشفرة', 'json'));
+    toast(full ? `تم تنزيل النسخة الكاملة المشفّرة ✓ (${count} مرفق)${missing ? ` — ${missing} مرفق مش موجود على هذا الجهاز` : ''}` : 'تم تنزيل النسخة المشفّرة ✓ احفظ كلمة السر في مكان آمن', missing ? 'warn' : 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
 const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'application/pdf': '.pdf' };
-export async function downloadFullBackup() {
+async function buildFullBackup() {
   const files = [{ name: BACKUP_JSON, data: store.backupJSON() }];
   const seen = new Set();
   let missing = 0;
@@ -234,6 +260,10 @@ export async function downloadFullBackup() {
       else missing++;
     }
   }
-  save(new Blob([zipBytes(files)], { type: 'application/zip' }), backupName('نسخة-كاملة', 'zip'));
-  toast(`تم تنزيل النسخة الكاملة ✓ (${files.length - 1} مرفق)${missing ? ` — ${missing} مرفق مش موجود على هذا الجهاز` : ''}`, missing ? 'warn' : 'ok');
+  return { bytes: zipBytes(files), count: files.length - 1, missing };
+}
+export async function downloadFullBackup() {
+  const { bytes, count, missing } = await buildFullBackup();
+  save(new Blob([bytes], { type: 'application/zip' }), backupName('نسخة-كاملة', 'zip'));
+  toast(`تم تنزيل النسخة الكاملة ✓ (${count} مرفق)${missing ? ` — ${missing} مرفق مش موجود على هذا الجهاز` : ''}`, missing ? 'warn' : 'ok');
 }

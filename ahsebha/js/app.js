@@ -361,6 +361,7 @@ async function boot() {
     if (b.dataset.tab === 'add') quickSheet(); else document.getElementById('app').classList.toggle('nav-open');
   });
   await store.load();
+  store.dailySnapshot();
   await license.init().catch(() => {});
   auth.init({
     onChange: (kind) => {
