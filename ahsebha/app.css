@@ -866,6 +866,12 @@ dialog.sheet::backdrop { background: rgba(15, 23, 42, .5); }
 .dl-steps summary { cursor: pointer; font-weight: 800; padding: 10px 0; list-style-position: inside; }
 .dl-steps details[open] summary { color: var(--primary); }
 .dl-steps .install-steps { padding-bottom: 12px; }
+.hash-list { display: grid; gap: 8px; }
+.hash-row { display: grid; gap: 4px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+.hash-row code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; color: var(--text-muted); word-break: break-all; user-select: all; }
+.hash-help { margin-top: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px; }
+.hash-help summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+.hash-help .install-steps { padding-bottom: 12px; }
 .dl-grid { grid-template-columns: repeat(4, 1fr); }
 .dl-grid .plan-cta .btn { white-space: normal; text-align: center; }
 @media (max-width: 960px) { .dl-grid { grid-template-columns: repeat(2, 1fr); } }

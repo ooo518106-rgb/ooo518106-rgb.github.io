@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { browserKind, KINDS } from '../js/views/install.js';
-import { DOWNLOADS, REPO, detectOS, downloadUrl, forOS, releasesUrl } from '../js/downloads.js';
+import { DOWNLOADS, REPO, detectOS, downloadUrl, forOS, releasesUrl, digestsOf, fetchDigests, releaseApi } from '../js/downloads.js';
 
 const UA = {
   winChrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -81,4 +81,30 @@ test('روابط التحميل: ثابتة ومن صفحة الإصدارات �
   const wf = readFileSync(new URL('../../.github/workflows/desktop.yml', import.meta.url), 'utf8');
   assert.match(wf, /gh release create/);
   assert.ok(wf.includes('installers/*'));
+});
+
+test('بصمات الملفات: تُقرأ من حقل digest في صفحة الإصدار، ويُهمل غير الصالح', () => {
+  const h = (c) => c.repeat(64);
+  const rel = { assets: [
+    { name: 'Kenz-Setup.exe', digest: `sha256:${h('a')}` },
+    { name: 'Kenz-mac-arm64.dmg', digest: `SHA256:${h('B')}` },
+    { name: 'Kenz-mac-x64.dmg', digest: `sha256:${h('c')}`.slice(0, -1) }, // ناقصة
+    { name: 'Kenz-linux-x64.AppImage' }, // بلا بصمة
+    { name: 'other.zip', digest: `sha256:${h('d')}` }, // ملف ليس من التحميلات
+    { name: 'Kenz-Setup.exe.blockmap', digest: 'md5:abc' },
+  ] };
+  assert.deepEqual(digestsOf(rel), { 'Kenz-Setup.exe': h('a'), 'Kenz-mac-arm64.dmg': h('b') }, 'الحرف الكبير في البادئة والبصمة يُقبل ويُوحَّد، والناقصة والمجهولة تُهمل');
+  assert.deepEqual(digestsOf({ assets: [{ name: 'Kenz-mac-arm64.dmg', digest: `sha256:${h('B')}` }] }), { 'Kenz-mac-arm64.dmg': h('b') }, 'الأحرف الكبيرة تُوحَّد');
+  assert.deepEqual(digestsOf(null), {});
+  assert.deepEqual(digestsOf({}), {});
+  assert.match(releaseApi, new RegExp(`^https://api\\.github\\.com/repos/${REPO}/releases/latest$`));
+});
+
+test('جلب البصمات: يرجّع null عند أي تعذّر فلا تتعطل الصفحة', async () => {
+  const good = { assets: [{ name: 'Kenz-Setup.exe', digest: `sha256:${'e'.repeat(64)}` }] };
+  assert.deepEqual(await fetchDigests(async (u) => { assert.equal(u, releaseApi); return { ok: true, json: async () => good }; }), { 'Kenz-Setup.exe': 'e'.repeat(64) });
+  assert.equal(await fetchDigests(async () => ({ ok: false, status: 403 })), null, 'تجاوز حد الطلبات');
+  assert.equal(await fetchDigests(async () => { throw new Error('offline'); }), null, 'بلا إنترنت');
+  assert.equal(await fetchDigests(async () => ({ ok: true, json: async () => ({ assets: [] }) })), null, 'بلا بصمات');
+  assert.equal(await fetchDigests(async () => ({ ok: true, json: async () => { throw new Error('bad json'); } })), null);
 });

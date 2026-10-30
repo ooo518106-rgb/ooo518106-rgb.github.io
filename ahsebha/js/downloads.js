@@ -24,3 +24,24 @@ export function detectOS(ua = typeof navigator !== 'undefined' ? navigator.userA
 
 // ما يُنصح به لنظام الزائر (قد يكون أكثر من ملف: ماك فيه معالجان)
 export const forOS = (os) => DOWNLOADS.filter((d) => d.os === os);
+
+// بصمة SHA-256 لكل ملف: GitHub يحسبها لكل ملف في الإصدار (الحقل digest بصيغة sha256:…).
+// تعرضها صفحة التنزيلات ليتأكد المستخدم أن الملف الذي نزّله هو نفسه المنشور وما عدّل عليه أحد.
+export const releaseApi = `https://api.github.com/repos/${REPO}/releases/latest`;
+export function digestsOf(release) {
+  const out = {};
+  for (const a of (release && release.assets) || []) {
+    const m = /^sha256:([0-9a-f]{64})$/i.exec((a && a.digest) || '');
+    if (m && DOWNLOADS.some((d) => d.file === a.name)) out[a.name] = m[1].toLowerCase();
+  }
+  return out;
+}
+// يرجّع { اسم_الملف: البصمة } أو null إن تعذّر الجلب (بلا إنترنت أو تجاوز حد الطلبات) فلا تتأثر الصفحة
+export async function fetchDigests(get = (u) => fetch(u, { headers: { Accept: 'application/vnd.github+json' } })) {
+  try {
+    const r = await get(releaseApi);
+    if (!r.ok) return null;
+    const out = digestsOf(await r.json());
+    return Object.keys(out).length ? out : null;
+  } catch (e) { return null; }
+}
