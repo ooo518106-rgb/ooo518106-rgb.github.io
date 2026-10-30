@@ -2,11 +2,13 @@
 import { SCHEMA, defaultAccounts, defaultSettings, buildBooks, validateDoc, isLockedDate, docAmount, currencyInfo, ymd, addDays, addMonths, monthStart, monthEnd, daysBetween, isDate } from './core.js';
 import { BRAND } from './brand.js';
 import { docGate, docCreated, demoError } from './license.js';
+import { pack, unpack } from './pack.js';
 
 const APP_ID = 'ahsebha-accounting';
 const IDB_NAME = 'ahsebha-accounting';
 const IDB_STORE = 'kv';
 const LS_KEY = 'ahsebha-accounting';
+const LS_VER = LS_KEY + ':ver';
 
 let db = null;
 let rev = 0;
@@ -14,6 +16,17 @@ let cache = { rev: -1, day: '', books: null };
 let timer = null;
 let backend = 'idb';
 let failed = false;
+
+// الحفظ الآمن بين النوافذ: لكل نسخة محفوظة رقم إصدار. كل نافذة تتذكر رقم ما بُنيت عليه (baseVer) وتحتفظ بعملياتها التي لم تُحفظ (pending).
+// عند الحفظ: إن كان الرقم المخزّن هو نفسه نكتب ما عندنا مباشرة؛ وإن سبقتنا نافذة أخرى نبني على أحدث نسخة مخزّنة ونعيد عليها عملياتنا
+// (فتبقى فواتير الاثنتين وتتسلسل الأرقام)، كل ذلك داخل معاملة واحدة فلا تتداخل الكتابات.
+let baseVer = 0;
+let pending = [];
+let inflight = null;
+let force = false;
+let inflightForce = false;
+let queue = Promise.resolve();
+let lsLeft = false;
 const listeners = new Set();
 const tabId = newId();
 const channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(APP_ID) : null;
@@ -67,6 +80,17 @@ function idb() {
   }
   return idbPromise;
 }
+async function idbGetMany(keys) {
+  const d = await idb();
+  return new Promise((resolve, reject) => {
+    const tx = d.transaction(IDB_STORE, 'readonly');
+    const s = tx.objectStore(IDB_STORE);
+    const reqs = keys.map((k) => s.get(k));
+    tx.oncomplete = () => resolve(reqs.map((r) => r.result));
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
 async function idbOp(mode, fn) {
   const d = await idb();
   return new Promise((resolve, reject) => {
@@ -80,55 +104,162 @@ async function idbOp(mode, fn) {
 
 export async function load() {
   let data = null;
-  try { data = await idbOp('readonly', (s) => s.get('db')); backend = 'idb'; } catch (e) { backend = 'ls'; }
-  if (!data) {
-    try { const s = localStorage.getItem(LS_KEY); if (s) data = JSON.parse(s); } catch (e) { /* لا شيء محفوظ */ }
-  }
+  let idbVer = 0;
+  try {
+    const [d, v] = await idbGetMany(['db', 'ver']);
+    data = d; idbVer = Number(v) || 0; backend = 'idb';
+  } catch (e) { backend = 'ls'; }
+  // نسخة localStorage تُفضَّل إن كانت أحدث (تُكتب فقط حين تفشل كتابة IndexedDB)
+  lsLeft = false;
+  let lsVer = 0;
+  try {
+    const t = localStorage.getItem(LS_KEY);
+    if (t) {
+      const ls = JSON.parse(t);
+      lsLeft = true;
+      lsVer = Number(localStorage.getItem(LS_VER)) || 0;
+      if (!data || String(ls.updatedAt || '') > String(data.updatedAt || '')) data = ls;
+    }
+  } catch (e) { /* لا شيء محفوظ */ }
   db = data ? normalize(data) : null;
+  baseVer = backend === 'idb' ? idbVer : lsVer; // إصدار المخزن الذي سنكتب إليه، لا إصدار مصدر القراءة
+  pending = [];
+  force = false;
   rev++;
   return db;
 }
 
-async function write() {
-  timer = null;
-  if (!db) return;
+// الإصدار المخزّن الآن (للتحقق من وصول تغيير من نافذة أخرى)
+async function storedVersion() {
+  if (backend === 'idb') {
+    try { const [v] = await idbGetMany(['ver']); return Number(v) || 0; } catch (e) { return baseVer; }
+  }
+  try { return Number(localStorage.getItem(LS_VER)) || 0; } catch (e) { return baseVer; }
+}
+
+// يقرّر ما يُكتب: الإصدار المخزّن هو ما بنينا عليه ← نكتب نسخة الذاكرة، وإلا نبني على المخزّن ونعيد عليه عملياتنا.
+// latest: النسخة المخزّنة (تُمرَّر فقط حين يختلف الإصدار)، put(obj, ver, conflict): الكتابة الفعلية في نفس المعاملة.
+function commit(stored, latest, put) {
+  inflight = pending;
+  inflightForce = force;
+  pending = [];
+  let merged = false;
+  let conflict = null;
+  if (!force && stored !== baseVer) {
+    if (!latest) {
+      // البيانات حُذفت من نافذة أخرى: لا نعيدها، وتُسقط عملياتنا
+      inflight = [];
+      db = null;
+      merged = true;
+      rev++;
+      return { ver: stored, merged, gone: true };
+    }
+    const prev = db;
+    try {
+      db = normalize(latest);
+      for (const fn of inflight) fn(db);
+      db.updatedAt = now();
+      merged = true;
+    } catch (e) {
+      db = prev; // تعذّر الدمج: نكتب نسختنا ونحتفظ بالمخزّنة في خانة التعارض
+      conflict = latest;
+      console.error('store merge failed', e);
+    }
+    rev++;
+  }
+  force = false;
+  put(db, stored + 1, conflict);
+  return { ver: stored + 1, merged };
+}
+
+function casIdb() {
+  return idb().then((d) => new Promise((resolve, reject) => {
+    const tx = d.transaction(IDB_STORE, 'readwrite');
+    const s = tx.objectStore(IDB_STORE);
+    let result = null;
+    const fail = (e) => { if (inflight) { pending = inflight.concat(pending); inflight = null; if (inflightForce) force = true; } reject(e || tx.error || new Error('write failed')); };
+    tx.oncomplete = () => { inflight = null; baseVer = result.ver; resolve(result); };
+    tx.onerror = () => fail(tx.error);
+    tx.onabort = () => fail(tx.error);
+    const put = (obj, ver, conflict) => { s.put(obj, 'db'); s.put(ver, 'ver'); if (conflict) s.put(conflict, 'db-conflict'); };
+    const attempt = (stored, latest) => { try { result = commit(stored, latest, put); } catch (e) { try { tx.abort(); } catch (_) { /* انتهت */ } fail(e); } };
+    const rv = s.get('ver');
+    rv.onsuccess = () => {
+      const stored = Number(rv.result) || 0;
+      if (force || stored === baseVer) return attempt(stored, null);
+      const rd = s.get('db');
+      rd.onsuccess = () => attempt(stored, rd.result || null);
+    };
+  }));
+}
+
+function casLocal() {
+  const stored = Number(localStorage.getItem(LS_VER)) || 0;
+  let latest = null;
+  if (!force && stored !== baseVer) { const t = localStorage.getItem(LS_KEY); latest = t ? JSON.parse(t) : null; }
   try {
-    if (backend === 'idb') await idbOp('readwrite', (s) => s.put(db, 'db'));
-    else localStorage.setItem(LS_KEY, JSON.stringify(db));
+    const r = commit(stored, latest, (obj, ver) => { localStorage.setItem(LS_KEY, JSON.stringify(obj)); localStorage.setItem(LS_VER, String(ver)); });
+    inflight = null;
+    baseVer = r.ver;
+    return r;
+  } catch (e) { pending = (inflight || []).concat(pending); inflight = null; if (inflightForce) force = true; throw e; }
+}
+
+async function doWrite() {
+  if (!db && !force) return;
+  if (!pending.length && !force) return;
+  try {
+    const r = backend === 'idb' ? await casIdb() : casLocal();
     failed = false;
+    if (backend === 'idb' && lsLeft) { try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_VER); } catch (e) { /* اختياري */ } lsLeft = false; }
     if (channel) channel.postMessage({ type: 'saved', from: tabId });
+    if (r.merged) listeners.forEach((fn) => fn());
+    if (db) dailySnapshot();
   } catch (e) {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(db));
+      localStorage.setItem(LS_VER, String(baseVer));
       backend = 'ls';
       failed = false;
     } catch (e2) {
       failed = true;
-      window.dispatchEvent(new CustomEvent('acc:save-failed'));
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('acc:save-failed'));
     }
   }
 }
+function write() {
+  timer = null;
+  const p = queue.then(doWrite, doWrite);
+  queue = p.catch(() => {});
+  return p;
+}
+const canPersist = () => typeof window !== 'undefined' || globalThis.__KENZ_PERSIST__ === true; // الاختبارات في Node: بلا حفظ إلا إن طُلب
 function schedule() {
-  if (typeof window === 'undefined') return; // الاختبارات في Node: بلا حفظ
+  if (!canPersist()) return;
   clearTimeout(timer);
   timer = setTimeout(write, 200);
 }
 export function flush() {
   if (timer) { clearTimeout(timer); return write(); }
-  return Promise.resolve();
+  return queue.then(() => {}, () => {});
 }
 export const saveFailed = () => failed;
+
+// وصل تغيير من نافذة أخرى: نحفظ ما عندنا أولاً (يُدمج بأمان)، ثم نقرأ الجديد إن تغيّر الإصدار
+export async function syncExternal() {
+  if (timer) await flush();
+  else await queue.then(() => {}, () => {});
+  if ((await storedVersion()) !== baseVer) { await load(); listeners.forEach((fn) => fn()); }
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', () => { flush(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 }
 if (channel) {
-  channel.onmessage = async (e) => {
+  channel.onmessage = (e) => {
     if (!e.data || e.data.from === tabId) return;
-    if (timer) await flush();
-    await load();
-    listeners.forEach((fn) => fn());
+    syncExternal();
   };
 }
 
@@ -184,35 +315,59 @@ export const cleanFiles = (xs) => (Array.isArray(xs) ? xs : [])
   .map((f) => ({ id: f.id, name: String(f.name || 'مرفق').slice(0, 120), type: /^[\w.+-]+\/[\w.+-]+$/.test(f.type || '') ? f.type : 'application/octet-stream', size: Number(f.size) || 0 }))
   .slice(0, 30);
 
+// كل تعديل يُطبَّق الآن ويُحفظ كعملية (دالة على نسخة البيانات d فقط) لتُعاد على أحدث نسخة إن سبقتنا نافذة أخرى
 function mutate(fn) {
   fn(db);
+  pending.push(fn);
   db.updatedAt = now();
   rev++;
   schedule();
 }
 
 // ─── الشركة ───
-export function createCompany(settings, extra = {}) {
-  db = normalize({ settings: defaultSettings(settings), accounts: defaultAccounts(settings.country), ...extra });
+// الاستبدال الكامل (شركة جديدة، استعادة، استيراد، بيانات تجريبية) يكتب فوق المخزّن، وتُحفظ قبله نسخة من الحالة السابقة للتراجع
+function replaceWith(next) {
+  const old = db;
+  if (old && !old.demo && (old.docs.length || old.parties.length || old.products.length)) putSnapshot('before-replace', old).catch(() => {});
+  db = next;
+  pending = [];
+  force = true;
   rev++;
   schedule();
   requestPersist();
   return db;
 }
+export function createCompany(settings, extra = {}) {
+  return replaceWith(normalize({ settings: defaultSettings(settings), accounts: defaultAccounts(settings.country), ...extra }));
+}
 export function replaceDb(data) {
-  db = normalize(data);
-  rev++;
-  schedule();
-  requestPersist();
+  replaceWith(normalize(data));
 }
 export async function wipe() {
   clearTimeout(timer);
   timer = null;
+  pending = [];
+  force = false;
   db = null;
   rev++;
-  try { await idbOp('readwrite', (s) => s.delete('db')); } catch (e) { /* قد لا يكون موجوداً */ }
+  await queue.then(() => {}, () => {});
+  // حذف البيانات والنسخ التلقائية، ورفع الإصدار ليعرف غيرنا أن البيانات حُذفت فلا يعيدها
+  try {
+    const d = await idb();
+    await new Promise((resolve, reject) => {
+      const tx = d.transaction(IDB_STORE, 'readwrite');
+      const st = tx.objectStore(IDB_STORE);
+      const rv = st.get('ver');
+      const rs = st.get('snaps');
+      rv.onsuccess = () => { const v = (Number(rv.result) || 0) + 1; baseVer = v; st.put(v, 'ver'); };
+      rs.onsuccess = () => { for (const m of rs.result || []) st.delete('snap:' + m.id); st.delete('snaps'); st.delete('db'); st.delete('db-conflict'); };
+      tx.oncomplete = resolve;
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  } catch (e) { /* قد لا يكون موجوداً */ }
   try { await deleteFiles(await fileIds()); } catch (e) { /* لا مرفقات */ }
-  try { localStorage.removeItem(LS_KEY); } catch (e) { /* قد لا يكون موجوداً */ }
+  try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_VER); } catch (e) { /* قد لا يكون موجوداً */ }
+  lastSnapDay = '';
   if (channel) channel.postMessage({ type: 'saved', from: tabId });
 }
 export function saveSettings(patch) { mutate((d) => Object.assign(d.settings, patch)); }
@@ -264,8 +419,10 @@ export function saveDoc(doc) {
   assertOpen(doc);
   // نسخة العرض: الحماية الأخيرة لحد الفواتير (التعديل على فاتورة موجودة لا يُحسب)
   if (!old) { const g = docGate(doc.type); if (g) throw demoError(g); }
+  let creating = null; // تُعاد هذه العملية على أحدث نسخة إن سبقتنا نافذة أخرى: التعديل لا يُنشئ مستنداً حذفته نافذة أخرى
   mutate((d) => {
     const i = doc.id ? d.docs.findIndex((x) => x.id === doc.id) : -1;
+    if (creating === null) creating = i < 0;
     if (i >= 0) {
       doc.updatedAt = now();
       if (actor) doc.editedBy = actor;
@@ -273,6 +430,9 @@ export function saveDoc(doc) {
       d.docs[i] = doc;
       return;
     }
+    if (!creating) return;
+    // مستند متكرر في موعده أُنشئ من نافذة أخرى: لا يتكرر
+    if (doc.recurring && d.docs.some((x) => x.recurring === doc.recurring && x.date === doc.date && x.id !== doc.id)) return;
     doc.id = doc.id || newId();
     doc.createdAt = now();
     if (actor) doc.by = actor;
@@ -430,8 +590,11 @@ export function saveRecurring(r) {
   return r;
 }
 export function deleteRecurring(id) { mutate((d) => { d.recurring = d.recurring.filter((x) => x.id !== id); }); }
-// تعديل في مكانه (نفس الكائن) حتى تبقى الحلقة تقرأ القيم الجديدة
-function patchRecurring(r, patch) { mutate(() => { Object.assign(r, patch); }); }
+// تعديل في مكانه (نفس الكائن) حتى تبقى الحلقة تقرأ القيم الجديدة؛ وعند إعادة العملية على نسخة أحدث نعدّل سجلها بالمعرّف
+function patchRecurring(r, patch) {
+  Object.assign(r, patch);
+  mutate((d) => { const x = d.recurring.find((y) => y.id === r.id); if (x && x !== r) Object.assign(x, patch); });
+}
 
 // ينشئ المستندات المستحقة حتى اليوم (عند فتح البرنامج)؛ يتوقف القالب عند أول خطأ ويُظهره
 export function runRecurring(today = ymd(new Date()), { only } = {}) {
@@ -523,6 +686,84 @@ export function saveUser(u) {
 export function deleteUser(id) { mutate((d) => { d.users = d.users.filter((x) => x.id !== id); }); }
 export function setRecovery(secret) { mutate((d) => { d.recovery = secret; }); }
 export function clearUsers() { mutate((d) => { d.users = []; d.recovery = null; }); }
+
+// ─── نسخ تلقائية على هذا الجهاز ───
+// نسخة يومية لآخر 7 أيام (تُؤخذ عند أول فتح أو حفظ في اليوم)، ونسخة «قبل آخر استبدال» لأي استعادة أو استيراد أو بيانات تجريبية.
+// تُحفظ مضغوطة داخل نفس قاعدة المتصفح، فتحميك من الأخطاء لا من ضياع الجهاز؛ والنسخة الاحتياطية خارج الجهاز تبقى هي الأساس.
+// قيد الفهرس 'snaps': [{ id, label, at, docs, bytes, name }]؛ والسجل نفسه تحت المفتاح snap:<id>.
+const SNAP_DAYS = 7;
+let snapBusy = false;
+let lastSnapDay = '';
+async function snapIndex() {
+  try { const [i] = await idbGetMany(['snaps']); return Array.isArray(i) ? i : []; } catch (e) { return []; }
+}
+export async function listSnapshots() {
+  return (await snapIndex()).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+async function putSnapshot(id, data) {
+  const rec = await pack(data);
+  const meta = { id, label: id.startsWith('d:') ? 'daily' : id, at: now(), docs: data.docs.length, bytes: rec.bytes, name: (data.settings && data.settings.name) || '' };
+  const d = await idb();
+  await new Promise((resolve, reject) => {
+    const tx = d.transaction(IDB_STORE, 'readwrite');
+    const st = tx.objectStore(IDB_STORE);
+    const ri = st.get('snaps');
+    ri.onsuccess = () => {
+      let index = (Array.isArray(ri.result) ? ri.result : []).filter((m) => m.id !== id);
+      index.push(meta);
+      const daily = index.filter((m) => m.id.startsWith('d:')).sort((a, b) => b.id.localeCompare(a.id));
+      for (const m of daily.slice(SNAP_DAYS)) { st.delete('snap:' + m.id); index = index.filter((x) => x.id !== m.id); }
+      st.put(rec, 'snap:' + id);
+      st.put(index, 'snaps');
+    };
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+  return meta;
+}
+// نسخة اليوم: تُؤخذ وقت الفراغ ولا تتكرر في اليوم نفسه
+export function dailySnapshot() {
+  if (!db || db.demo || backend !== 'idb' || snapBusy || typeof indexedDB === 'undefined') return;
+  const day = ymd(new Date());
+  if (lastSnapDay === day) return;
+  lastSnapDay = day;
+  snapBusy = true;
+  const run = async () => {
+    try {
+      if (db && !(await snapIndex()).some((m) => m.id === 'd:' + day)) await putSnapshot('d:' + day, db);
+    } catch (e) { lastSnapDay = ''; } finally { snapBusy = false; }
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 8000 }); else setTimeout(run, 1500);
+}
+// يأخذ نسخة الآن (للاختبار ولزر «احفظ نسخة تلقائية الآن» إن أُضيف)
+export async function snapshotNow(id = 'd:' + ymd(new Date())) {
+  if (!db) throw new Error('لا توجد بيانات');
+  return putSnapshot(id, db);
+}
+export const snapshotsSupported = () => backend === 'idb' && typeof indexedDB !== 'undefined';
+export async function readSnapshot(id) {
+  const [rec] = await idbGetMany(['snap:' + id]);
+  return rec ? unpack(rec) : null;
+}
+// يستعيد نسخة تلقائية مكان البيانات الحالية (والحالة الحالية تُحفظ تحت «قبل آخر استبدال» فيمكن التراجع)
+export async function restoreSnapshot(id) {
+  const data = await readSnapshot(id);
+  if (!data) throw new Error('هذه النسخة غير موجودة');
+  replaceDb(data);
+  await flush();
+  return db;
+}
+export async function deleteSnapshot(id) {
+  const d = await idb();
+  await new Promise((resolve, reject) => {
+    const tx = d.transaction(IDB_STORE, 'readwrite');
+    const st = tx.objectStore(IDB_STORE);
+    const ri = st.get('snaps');
+    ri.onsuccess = () => { st.delete('snap:' + id); st.put((Array.isArray(ri.result) ? ri.result : []).filter((m) => m.id !== id), 'snaps'); };
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
 
 // ─── المرفقات: صور الإيصالات والفواتير وملفات PDF ───
 // تُحفظ في IndexedDB بجانب البيانات (المفتاح file:<id>) والمستند يحمل وصفها فقط: files: [{ id, name, type, size }]

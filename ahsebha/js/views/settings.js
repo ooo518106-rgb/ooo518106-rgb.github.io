@@ -1,10 +1,10 @@
 // ═══ الإعدادات: المنشأة، الضريبة والعملة، الفواتير، السنة المالية، النسخ الاحتياطي ═══
 import * as store from '../store.js';
 import { COUNTRIES, CURRENCIES, validSaudiVat, isDate, num, payrollRates } from '../core.js';
-import { html, raw, fmtDate, toast, confirmBox, modal, $, showErrors, field, MONTHS, attr } from '../ui.js';
+import { html, raw, fmtDate, toast, confirmBox, modal, $, showErrors, field, MONTHS, attr, download } from '../ui.js';
 import { go, guard, setTitle } from '../nav.js';
 import { head, S, ssName } from './common.js';
-import { downloadBackup, downloadFullBackup, restoreFile, loadDemo } from './home.js';
+import { downloadBackup, downloadFullBackup, downloadEncryptedBackup, restoreFile, loadDemo } from './home.js';
 import { can } from '../auth.js';
 
 export function view({ root }) {
@@ -107,9 +107,15 @@ export function view({ root }) {
       <p class="muted small" style="margin-bottom:12px">بياناتك محفوظة في هذا المتصفح على هذا الجهاز فقط. نزّل نسخة احتياطية أسبوعياً على الأقل، واحفظها في مكان آمن (بريدك أو Google Drive). يمكنك استعادتها على أي جهاز.</p>
       <div class="actions"><button class="btn btn-primary" data-backup>⬇️ تنزيل نسخة احتياطية</button>
         ${store.usedFileIds().size ? html`<button class="btn btn-ghost" data-backup-full>🗂️ نسخة كاملة مع المرفقات (${store.usedFileIds().size})</button>` : ''}
+        <button class="btn btn-ghost" data-backup-enc>🔐 نسخة مشفّرة بكلمة سر</button>
+        ${store.usedFileIds().size ? html`<button class="btn btn-ghost" data-backup-enc-full>🔐 كاملة مشفّرة مع المرفقات</button>` : ''}
         ${can('admin') ? html`<label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label>` : ''}</div>
       ${store.usedFileIds().size ? html`<p class="muted small" style="margin-top:8px">النسخة العادية (.json) فيها كل البيانات بدون صور المرفقات وحجمها صغير. النسخة الكاملة (.zip) فيها الصور كمان.</p>` : ''}
       <p class="muted small" style="margin-top:10px" data-storage></p></div>
+
+    ${can('admin') ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>🕘 نسخ تلقائية على هذا الجهاز</h3></div>
+      <p class="muted small" style="margin-bottom:10px">يحفظ البرنامج وحده حالة بياناتك أول استعمال كل يوم (لآخر 7 أيام)، وحالتك قبل أي استعادة أو استيراد أو بيانات تجريبية، داخل المتصفح نفسه. تحميك من الأخطاء: حذف بالغلط أو استعادة نسخة غلط. لكنها ليست بديلاً عن النسخة الاحتياطية خارج الجهاز: لو انمسحت بيانات المتصفح أو ضاع الجهاز بتضيع معها.</p>
+      <div data-snaps><p class="muted small">جارٍ التحميل…</p></div></div>` : ''}
 
     ${can('admin') ? html`<div class="card" style="margin-top:14px;border-color:var(--neg)"><div class="card-h"><h3>⚠️ منطقة الخطر</h3></div>
       <div class="actions"><button class="btn btn-ghost" data-demo>🧪 استبدال البيانات ببيانات تجريبية</button><button class="btn btn-danger" data-wipe>🗑️ حذف كل البيانات</button></div></div>` : ''}`);
@@ -182,11 +188,11 @@ export function view({ root }) {
 
   const full = $('[data-backup-full]', root);
   if (full) full.onclick = async () => { full.disabled = true; try { await downloadFullBackup(); } finally { full.disabled = false; } };
-  $('[data-backup]', root).onclick = (e) => {
-    downloadBackup();
-    const h = e.target.closest('.card').querySelector('.card-h .muted');
-    if (h) h.textContent = 'آخر نسخة: ' + fmtDate(new Date().toISOString().slice(0, 10));
-  };
+  const stamp = (el) => { const h = el.closest('.card').querySelector('.card-h .muted'); if (h) h.textContent = 'آخر نسخة: ' + fmtDate(new Date().toISOString().slice(0, 10)); };
+  $('[data-backup]', root).onclick = (e) => { downloadBackup(); stamp(e.target); };
+  $('[data-backup-enc]', root).onclick = async (e) => { const b = e.currentTarget; await downloadEncryptedBackup(); stamp(b); };
+  const encFull = $('[data-backup-enc-full]', root);
+  if (encFull) encFull.onclick = async () => { encFull.disabled = true; try { await downloadEncryptedBackup({ full: true }); stamp(encFull); } finally { encFull.disabled = false; } };
   if (can('admin')) {
     $('[data-lock-save]', root).onclick = async () => {
       const v = $('[data-lock]', root).value;
@@ -205,6 +211,7 @@ export function view({ root }) {
       go('#/settings');
     };
     $('[data-restore]', root).onchange = (e) => restoreFile(e.target.files[0]);
+    drawSnaps(root);
     $('[data-demo]', root).onclick = () => loadDemo();
     $('[data-wipe]', root).onclick = async () => {
       if (!(await confirmBox('سيتم حذف كل بيانات المنشأة من هذا الجهاز نهائياً: الفواتير والعملاء والمنتجات والقيود. لا يمكن التراجع إلا من نسخة احتياطية.', { ok: 'حذف كل شيء', danger: true, title: 'حذف كل البيانات' }))) return;
@@ -266,4 +273,44 @@ export function view({ root }) {
       if (el && quota) el.textContent = `المساحة المستخدمة في المتصفح: ${used.toFixed(1)} ميغابايت من ${quota > 1024 ? (quota / 1024).toFixed(0) + ' غيغابايت' : quota.toFixed(0) + ' ميغابايت'} متاحة.`;
     }).catch(() => {});
   }
+}
+
+
+// ─── النسخ التلقائية على الجهاز: قائمة واستعادة وتنزيل وحذف ───
+const snapLabel = (m) => (m.id.startsWith('d:') ? `حالة البيانات أول استعمال يوم ${fmtDate(m.id.slice(2))}` : m.id === 'before-replace' ? 'الحالة قبل آخر استبدال للبيانات (استعادة أو استيراد أو بيانات تجريبية)' : m.id);
+const sizeLabel = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} م.ب` : `${Math.max(1, Math.round(b / 1024))} ك.ب`);
+async function drawSnaps(root) {
+  const box = $('[data-snaps]', root);
+  if (!box) return;
+  let list = [];
+  try { list = await store.listSnapshots(); } catch (e) { /* لا IndexedDB */ }
+  if (!store.snapshotsSupported()) { box.innerHTML = String(html`<p class="muted small">النسخ التلقائية غير متاحة في هذا المتصفح (يلزمه IndexedDB). استعمل النسخة الاحتياطية اليدوية.</p>`); return; }
+  box.innerHTML = String(list.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>النسخة</th><th class="num">المستندات</th><th class="num hide-sm">الحجم</th><th></th></tr></thead><tbody>
+    ${list.map((m) => html`<tr><td>${snapLabel(m)}${m.id === 'before-replace' ? html` <span class="badge badge-info">للتراجع</span>` : ''}<div class="muted small">${m.name || ''}</div></td><td class="num">${m.docs}</td><td class="num hide-sm">${sizeLabel(m.bytes)}</td>
+      <td class="num"><span class="inline" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" data-snap-restore="${m.id}">↩️ استعادة</button><button class="btn btn-ghost btn-sm" data-snap-dl="${m.id}" aria-label="تنزيل ${snapLabel(m)}">⬇️</button><button class="icon-btn" data-snap-del="${m.id}" aria-label="حذف ${snapLabel(m)}">🗑️</button></span></td></tr>`)}
+    </tbody></table></div>` : html`<p class="muted small">لا توجد نسخ تلقائية بعد. أول نسخة تُؤخذ بعد أول حفظ للبيانات اليوم.</p>`);
+  const find = (id) => list.find((m) => m.id === id);
+  box.onclick = async (e) => {
+    const r = e.target.closest('[data-snap-restore]');
+    const d = e.target.closest('[data-snap-dl]');
+    const x = e.target.closest('[data-snap-del]');
+    try {
+      if (r) {
+        const m = find(r.dataset.snapRestore);
+        if (!(await confirmBox(`سيتم استبدال بياناتك الحالية بهذه النسخة (${snapLabel(m)}، ${m.docs} مستند). حالتك الحالية تُحفظ تلقائياً تحت «قبل آخر استبدال» فتقدر تتراجع.`, { ok: 'استعادة', danger: true, title: 'استعادة نسخة تلقائية' }))) return;
+        await store.restoreSnapshot(m.id);
+        window.dispatchEvent(new Event('acc:shell'));
+        toast('تمت الاستعادة ✓ وحالتك السابقة محفوظة للتراجع');
+        go('#/');
+      } else if (d) {
+        const data = await store.readSnapshot(d.dataset.snapDl);
+        download(`نسخة-تلقائية-${d.dataset.snapDl.replace(/[^\w-]+/g, '')}.json`, JSON.stringify({ ...data, exportedAt: new Date().toISOString() }), 'application/json');
+      } else if (x) {
+        const m = find(x.dataset.snapDel);
+        if (!(await confirmBox(`حذف هذه النسخة التلقائية (${snapLabel(m)})؟`, { ok: 'حذف', danger: true }))) return;
+        await store.deleteSnapshot(m.id);
+        drawSnaps(root);
+      }
+    } catch (err) { toast(err.message, 'err'); }
+  };
 }
