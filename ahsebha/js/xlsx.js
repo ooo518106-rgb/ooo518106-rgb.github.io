@@ -99,23 +99,8 @@ const textOf = (xml) => [...xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map
 const colIndex = (ref) => { let n = 0; for (const ch of ref.replace(/\d+/g, '')) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
 const colName = (i) => { let s = ''; for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
 
-// يرجّع صفوف أول ورقة كمصفوفة ثنائية من النصوص والأرقام
-export async function readXlsx(buf) {
-  const entries = unzipEntries(buf);
-  const shared = [];
-  const ss = await entryText(entries, 'xl/sharedStrings.xml');
-  if (ss) for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textOf(m[1]));
-  let sheetPath = 'xl/worksheets/sheet1.xml';
-  const wb = await entryText(entries, 'xl/workbook.xml');
-  const rels = await entryText(entries, 'xl/_rels/workbook.xml.rels');
-  const firstSheet = wb && wb.match(/<sheet\b[^>]*\br:id="([^"]+)"/);
-  if (firstSheet && rels) {
-    const rel = [...rels.matchAll(/<Relationship\b[^>]*>/g)].map((m) => m[0]).find((r) => r.includes(`Id="${firstSheet[1]}"`));
-    const target = rel && rel.match(/Target="([^"]+)"/);
-    if (target) sheetPath = target[1].startsWith('/') ? target[1].slice(1) : 'xl/' + target[1].replace(/^\.\//, '');
-  }
-  const xml = await entryText(entries, sheetPath);
-  if (!xml) throw new Error('لم أجد ورقة بيانات في الملف');
+// صفوف ورقة واحدة كمصفوفة ثنائية من النصوص والأرقام (الصفوف الفارغة تبقى فارغة حتى تطابق أرقام الأسطر في Excel)
+function sheetRows(xml, shared) {
   const rows = [];
   for (const rm of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
     const rAttr = rm[1].match(/\br="(\d+)"/);
@@ -138,6 +123,40 @@ export async function readXlsx(buf) {
     rows[r] = Array.from(row, (x) => (x === undefined ? '' : x));
   }
   return Array.from(rows, (x) => x || []);
+}
+
+// كل أوراق المصنّف: [{ name, rows }] بترتيبها في الملف
+export async function readXlsxSheets(buf) {
+  const entries = unzipEntries(buf);
+  const shared = [];
+  const ss = await entryText(entries, 'xl/sharedStrings.xml');
+  if (ss) for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textOf(m[1]));
+  const wb = await entryText(entries, 'xl/workbook.xml');
+  const rels = await entryText(entries, 'xl/_rels/workbook.xml.rels');
+  const relList = rels ? [...rels.matchAll(/<Relationship\b[^>]*>/g)].map((m) => m[0]) : [];
+  const listed = wb ? [...wb.matchAll(/<sheet\b[^>]*>/g)].map((m) => m[0]) : [];
+  const out = [];
+  for (const tag of listed) {
+    const name = unescapeXml((tag.match(/\bname="([^"]*)"/) || [])[1] || `ورقة ${out.length + 1}`);
+    const rid = (tag.match(/\br:id="([^"]+)"/) || [])[1];
+    const rel = rid && relList.find((r) => r.includes(`Id="${rid}"`));
+    const target = rel && rel.match(/Target="([^"]+)"/);
+    if (!target) continue;
+    const path = target[1].startsWith('/') ? target[1].slice(1) : 'xl/' + target[1].replace(/^\.\//, '');
+    const xml = await entryText(entries, path);
+    if (xml) out.push({ name, rows: sheetRows(xml, shared) });
+  }
+  if (!out.length) {
+    const xml = await entryText(entries, 'xl/worksheets/sheet1.xml');
+    if (!xml) throw new Error('لم أجد ورقة بيانات في الملف');
+    out.push({ name: 'ورقة 1', rows: sheetRows(xml, shared) });
+  }
+  return out;
+}
+
+// صفوف أول ورقة فقط (للاستعمالات القديمة)
+export async function readXlsx(buf) {
+  return (await readXlsxSheets(buf))[0].rows;
 }
 
 // ─── CSV (للملفات المحفوظة من Excel بصيغة CSV) ───
@@ -164,6 +183,14 @@ export function parseCSV(text) {
   }
   if (cell || row.length) { row.push(cell); rows.push(row); }
   return rows.filter((r) => r.some((c) => String(c).trim() !== ''));
+}
+
+// يقرأ أي ملف (xlsx أو csv) ويرجّع الأوراق: [{ name, rows }] (CSV ورقة واحدة)
+export async function readSheets(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  if (buf[0] === 0x50 && buf[1] === 0x4b) return readXlsxSheets(buf);
+  if (/\.xls$/i.test(file.name)) throw new Error('صيغة xls القديمة غير مدعومة. احفظ الملف بصيغة xlsx أو CSV');
+  return [{ name: 'CSV', rows: parseCSV(decodeText(buf)) }];
 }
 
 // يقرأ أي ملف (xlsx أو csv) ويرجّع الصفوف

@@ -27,6 +27,7 @@ import * as stockViews from './views/stock.js';
 import * as reconcile from './views/reconcile.js';
 import * as todayView from './views/today.js';
 import * as subscription from './views/subscription.js';
+import * as gate from './views/gate.js';
 import { openPalette } from './views/palette.js';
 import * as license from './license.js';
 import { CONFIG } from './plans.js';
@@ -347,6 +348,11 @@ function generateRecurring() {
   } catch (e) { console.error(e); }
 }
 
+// قبل شاشة القفل أيضاً: حتى يصل الجهاز المقفل أي تحديث لاحق للبرنامج
+function registerSw() {
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
 async function boot() {
   watchIcons();
   watchA11y();
@@ -363,6 +369,9 @@ async function boot() {
   await store.load();
   store.dailySnapshot();
   await license.init().catch(() => {});
+  registerSw();
+  // البرنامج مقفل بكود المالك: لا قوائم ولا بيانات تُرسم قبل أن يُقبل كود صالح
+  if (!license.gateOpen()) await gate.show();
   auth.init({
     onChange: (kind) => {
       if (kind === 'lock') return;
@@ -395,7 +404,10 @@ async function boot() {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) { e.preventDefault(); openSearch(); }
     else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.code === 'Slash' || e.key === '/') && !typing(e.target) && parseHash().path !== 'pos') { e.preventDefault(); openSearch(); }
   });
-  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // القفل يُفحص عند الفتح، وكل ساعة وعند العودة للنافذة: نافذة تبقى مفتوحة أياماً لا تتجاوز انتهاء الكود
+  const recheckGate = () => { if (!license.gateOpen() && !guard.dirty) location.reload(); };
+  setInterval(recheckGate, 3600000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) recheckGate(); });
   render();
 }
 

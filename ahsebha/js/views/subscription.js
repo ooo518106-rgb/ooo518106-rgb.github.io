@@ -26,11 +26,13 @@ function actions(what = 'الاشتراك', { extra = '' } = {}) {
 
 // ─── شريط تنبيه على الرئيسية: فقط عند اقتراب الانتهاء أو انتهائه ───
 export function banner() {
-  if (!lic.enforcing() || !lic.license() || lic.demo()) return '';
+  if (!lic.tracksExpiry() || !lic.license() || lic.demo()) return '';
   const e = lic.entitlement();
   const renew = html` <a href="#/subscription">جدّد من هنا</a>`;
-  if (e.status === 'active' && e.daysLeft <= 7) return html`<p class="note note-warn" style="margin-bottom:14px">⏳ اشتراكك (${e.planName}) ينتهي ${e.daysLeft === 0 ? 'اليوم' : `بعد ${daysText(e.daysLeft)}`}. جدّده حتى لا تُقفل الميزات المدفوعة.${renew}</p>`;
-  if (e.status === 'grace') return html`<p class="note note-warn" style="margin-bottom:14px">⚠️ انتهى اشتراكك (${e.planName}) وما زالت ميزاته تعمل ${daysText(e.graceLeft)} إضافية ثم تُقفل. بياناتك محفوظة في كل الأحوال.${renew}</p>`;
+  // البرنامج كله مقفل بالكود: الانتهاء يقفله كله وليس الميزات المدفوعة فقط
+  const whole = lic.gateOn();
+  if (e.status === 'active' && e.daysLeft <= 7) return html`<p class="note note-warn" style="margin-bottom:14px">⏳ اشتراكك (${e.planName}) ينتهي ${e.daysLeft === 0 ? 'اليوم' : `بعد ${daysText(e.daysLeft)}`}. جدّده حتى ${whole ? 'لا يتوقف البرنامج' : 'لا تُقفل الميزات المدفوعة'}.${renew}</p>`;
+  if (e.status === 'grace') return html`<p class="note note-warn" style="margin-bottom:14px">⚠️ انتهى اشتراكك (${e.planName}) ${whole ? html`وما زال البرنامج يعمل ${daysText(e.graceLeft)} إضافية ثم يتوقف حتى تفعّل كوداً جديداً` : html`وما زالت ميزاته تعمل ${daysText(e.graceLeft)} إضافية ثم تُقفل`}. بياناتك محفوظة في كل الأحوال.${renew}</p>`;
   if (e.status === 'expired') return html`<p class="note note-warn" style="margin-bottom:14px">🔒 انتهى اشتراكك وعاد البرنامج للباقة المجانية. بياناتك كلها محفوظة وتستطيع تنزيل نسخة احتياطية في أي وقت.${renew}</p>`;
   return '';
 }
@@ -169,7 +171,7 @@ export function view({ root }) {
   const lastBackup = store.getDb() && store.getDb().settings.lastBackupAt;
   const clearBtn = html`<button type="button" class="btn btn-ghost btn-sm" data-clear>إلغاء التفعيل على هذا الجهاز</button>`;
   const prob = problem ? html`<p class="note note-warn" style="margin-bottom:14px">⚠️ الكود المحفوظ على هذا الجهاز لا يعمل: ${lic.REASONS[problem] || ''}</p>` : '';
-  const wait = !on ? html`<p class="note note-info" style="margin-bottom:14px">ℹ️ الاشتراكات لم تبدأ بعد: كل الميزات مفتوحة الآن للجميع.</p>` : '';
+  const wait = !on && !lic.gateOn() ? html`<p class="note note-info" style="margin-bottom:14px">ℹ️ الاشتراكات لم تبدأ بعد: كل الميزات مفتوحة الآن للجميع.</p>` : '';
 
   // الاشتراك الحقيقي: الباقة والمتبقي والتجديد
   const statusHero = () => {
@@ -252,8 +254,11 @@ export function view({ root }) {
   const clear = $('[data-clear]', root);
   if (clear) {
     clear.onclick = async () => {
-      if (!(await confirmBox('سيعود البرنامج للباقة المجانية على هذا الجهاز. بياناتك لا تتأثر، ويمكنك تفعيل الكود لاحقاً.', { ok: 'إلغاء التفعيل', danger: true, title: 'إلغاء التفعيل' }))) return;
+      const whole = lic.gateOn();
+      if (!(await confirmBox(whole ? 'سيتوقف البرنامج على هذا الجهاز حتى تُدخل كود تفعيل. بياناتك لا تتأثر، ويمكنك تفعيل الكود لاحقاً.' : 'سيعود البرنامج للباقة المجانية على هذا الجهاز. بياناتك لا تتأثر، ويمكنك تفعيل الكود لاحقاً.', { ok: 'إلغاء التفعيل', danger: true, title: 'إلغاء التفعيل' }))) return;
       lic.clear();
+      // البرنامج مقفل بالكود: بعد إلغائه تظهر شاشة القفل فوراً
+      if (whole) { location.reload(); return; }
       refreshShell();
       view({ root });
     };

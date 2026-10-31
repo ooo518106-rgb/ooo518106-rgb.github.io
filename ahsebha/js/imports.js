@@ -9,15 +9,16 @@ export const normKey = (s) => String(s ?? '').toLowerCase()
   .split(/[\s_\-.:()/\\#*]+/).map((w) => w.replace(/^ال(?=\S{3})/, '')).join('');
 
 const PRODUCT_FIELDS = [
-  { k: 'name', t: 'الاسم', req: true, syn: ['اسم', 'اسم المنتج', 'اسم الصنف', 'صنف', 'منتج', 'البيان', 'name', 'product', 'product name', 'item', 'item name', 'description'] },
+  // الترتيب أولوية: «اسم المادة» أقوى من «اسم الصنف»، فإن وُجد الاثنان صار الصنف تصنيفاً (انظر category)
+  { k: 'name', t: 'الاسم', req: true, syn: ['اسم المادة', 'المادة', 'اسم المنتج', 'المنتج', 'اسم السلعة', 'السلعة', 'اسم الصنف', 'الصنف', 'صنف', 'اسم', 'البيان', 'مادة', 'منتج', 'سلعة', 'name', 'product', 'product name', 'item', 'item name', 'description'] },
   { k: 'nameEn', t: 'الاسم بالإنجليزي', syn: ['الاسم بالانجليزي', 'اسم انجليزي', 'الاسم الانجليزي', 'english name', 'name en', 'name english'] },
   { k: 'barcode', t: 'الباركود', syn: ['باركود', 'الباركود', 'barcode', 'bar code', 'ean', 'upc', 'gtin'] },
   { k: 'sku', t: 'الرمز (SKU)', syn: ['رمز', 'الرمز', 'كود', 'رقم الصنف', 'كود الصنف', 'sku', 'code', 'item code', 'ref'] },
-  { k: 'category', t: 'التصنيف', syn: ['تصنيف', 'التصنيف', 'الفئه', 'فئه', 'القسم', 'قسم', 'مجموعه', 'category', 'group', 'department'] },
+  { k: 'category', t: 'التصنيف', syn: ['تصنيف', 'التصنيف', 'الفئه', 'فئه', 'القسم', 'قسم', 'مجموعه', 'category', 'group', 'department', 'family', 'نوع الصنف', 'نوع المادة', 'اسم الصنف', 'الصنف', 'صنف'] },
   { k: 'type', t: 'النوع (منتج / خدمة)', syn: ['نوع', 'النوع', 'type', 'kind'] },
   { k: 'unit', t: 'الوحدة', syn: ['وحده', 'الوحده', 'unit', 'uom'] },
-  { k: 'price', t: 'سعر البيع', num: true, syn: ['سعر البيع', 'سعر', 'السعر', 'price', 'sale price', 'selling price', 'sales price', 'retail price'] },
-  { k: 'cost', t: 'سعر الشراء (التكلفة)', num: true, syn: ['سعر الشراء', 'التكلفه', 'تكلفه', 'سعر التكلفه', 'cost', 'purchase price', 'buy price', 'cost price'] },
+  { k: 'price', t: 'سعر البيع', num: true, syn: ['سعر البيع', 'سعر المبيع', 'سعر المفرق', 'سعر', 'السعر', 'المبيع', 'المفرق', 'البيع', 'بيع', 'price', 'sale price', 'selling price', 'sales price', 'retail price'] },
+  { k: 'cost', t: 'سعر الشراء (التكلفة)', num: true, syn: ['سعر الشراء', 'سعر التكلفه', 'سعر الكلفه', 'التكلفه', 'الكلفه', 'تكلفه', 'كلفه', 'الشراء', 'شراء', 'cost', 'purchase price', 'buy price', 'cost price'] },
   { k: 'openQty', t: 'الكمية الافتتاحية', num: true, syn: ['كميه', 'الكميه', 'الكميه الافتتاحيه', 'الرصيد', 'رصيد', 'المخزون', 'qty', 'quantity', 'stock', 'on hand', 'opening qty'] },
   { k: 'reorder', t: 'حد إعادة الطلب', num: true, syn: ['حد الطلب', 'حد اعاده الطلب', 'الحد الادني', 'reorder', 'reorder level', 'min', 'minimum'] },
   { k: 'tax', t: 'الضريبة (خاضع / صفري / معفى)', syn: ['ضريبه', 'الضريبه', 'tax', 'vat', 'tax category'] },
@@ -40,20 +41,151 @@ export const IMPORT_TYPES = {
   suppliers: { name: 'الموردون', one: 'مورد', kind: 'supplier', fields: partyFields('supplier'), list: '#/suppliers' },
 };
 
-// يحدد عمود كل حقل من عناوين الصف الأول: تطابق كامل أولاً، ثم احتواء
-export function guessMapping(headers, type) {
-  const fields = IMPORT_TYPES[type].fields;
+// ═══ التعرّف على الأعمدة: من العناوين أولاً، ثم من محتوى الأعمدة نفسها ═══
+// درجة تطابق عنوان مع حقل: تطابق كامل (والأقدم في قائمة المرادفات أقوى) ثم احتواء كلمة مميّزة
+const keysOf = (f) => (f._keys || (f._keys = [f.t, ...f.syn].map(normKey)));
+export function headerScore(f, h) {
+  if (!h) return 0;
+  const keys = keysOf(f);
+  const i = keys.indexOf(h);
+  if (i >= 0) return 200 - Math.min(i, 60);
+  let best = 0;
+  keys.forEach((k, j) => { if (k.length >= 3 && h.includes(k)) best = Math.max(best, 100 + Math.min(k.length, 20) - Math.min(j, 40) / 4); });
+  return best;
+}
+
+// تعيين حريص: أعلى الدرجات أولاً، حقل واحد لكل عمود وعمود واحد لكل حقل
+function assignByHeaders(headers, fields) {
   const keys = headers.map(normKey);
-  const map = {};
-  const used = new Set();
-  const pick = (f, test) => {
-    if (map[f.k] != null) return;
-    const i = keys.findIndex((h, j) => h && !used.has(j) && test(h));
-    if (i >= 0) { map[f.k] = i; used.add(i); }
-  };
-  for (const f of fields) { const syn = [f.t, ...f.syn].map(normKey); pick(f, (h) => syn.includes(h)); }
-  for (const f of fields) { const syn = [f.t, ...f.syn].map(normKey).filter((x) => x.length >= 3); pick(f, (h) => syn.some((x) => h.includes(x))); }
+  const cands = [];
+  for (const f of fields) keys.forEach((h, j) => { const sc = headerScore(f, h); if (sc >= 100) cands.push({ f: f.k, j, sc }); });
+  cands.sort((a, b) => b.sc - a.sc || a.j - b.j);
+  const map = {}; const used = new Set();
+  for (const c of cands) if (map[c.f] == null && !used.has(c.j)) { map[c.f] = c.j; used.add(c.j); }
   return map;
+}
+
+// يحدد عمود كل حقل من عناوين الصف الأول (للتوافق مع الاستعمالات القديمة)
+export function guessMapping(headers, type) {
+  return assignByHeaders(headers, IMPORT_TYPES[type].fields);
+}
+
+// رقم من خلية: يقبل الأرقام العربية والفواصل ورموز العملة، وNaN إن لم تكن رقماً
+const CURRENCY = /(د\.?\s?[أا]|دينار|ريال|درهم|جنيه|ر\.?\s?س|sar|jod|usd|aed|egp|kd|\$|€|£)/gi;
+export function asNumber(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  const s = String(v ?? '').replace(CURRENCY, '').replace(/[\s ]/g, '');
+  if (!s || !/^[-+]?[\d٠-٩۰-۹]+(?:[.,٫٬][\d٠-٩۰-۹]+)*%?$/.test(s)) return NaN;
+  const t = s.replace(/%$/, '');
+  // فاصلة وحيدة بعدها رقم أو رقمان = فاصلة عشرية («0,25» و«12,5»)؛ غير ذلك الفاصلة للآلاف («1,250»)
+  return num(/^[-+]?[\d٠-٩۰-۹]+,[\d٠-٩۰-۹]{1,2}$/.test(t) ? t.replace(',', '.') : t);
+}
+
+// بصمة عمود من أول 400 قيمة: نسبة الأرقام، نسبة التنوع، متوسط الطول، هل يشبه الباركود، والوسيط
+export function profileColumn(data, col) {
+  const vals = [];
+  for (let i = 0; i < data.length && vals.length < 400; i++) { const v = data[i] && data[i][col]; if (String(v ?? '').trim() !== '') vals.push(v); }
+  const n = vals.length;
+  if (!n) return { n: 0, numeric: 0, unique: 0, uniqueCount: 0, avgLen: 0, barcode: false, median: 0 };
+  const nums = []; const uniq = new Set(); let len = 0; let codes = 0;
+  for (const v of vals) {
+    const t = String(v).trim();
+    len += t.length;
+    uniq.add(normKey(t) || t);
+    const x = asNumber(v);
+    if (!Number.isNaN(x)) nums.push(x);
+    if (/^\d{8,14}$/.test(t.replace(/\.0+$/, ''))) codes++;
+  }
+  nums.sort((a, b) => a - b);
+  return { n, numeric: nums.length / n, unique: uniq.size / n, uniqueCount: uniq.size, avgLen: len / n, barcode: codes / n >= 0.8 && uniq.size / n >= 0.9, median: nums.length ? nums[Math.floor(nums.length / 2)] : 0 };
+}
+
+// أي صف هو صف العناوين؟ (قد تسبقه عناوين للجدول أو أسطر فارغة). -1 إن بدا الملف بلا عناوين
+export function findHeaderRow(rows, type) {
+  const fields = IMPORT_TYPES[type].fields;
+  let best = -1; let bestHits = 0;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = (rows[i] || []).map((c) => String(c ?? '').trim());
+    if (cells.filter(Boolean).length < 2) continue;
+    let hits = 0;
+    for (const h of cells) { const k = normKey(h); if (k && fields.some((f) => headerScore(f, k) >= 100)) hits++; }
+    if (hits > bestHits) { best = i; bestHits = hits; }
+  }
+  if (bestHits > 0) return best;
+  // لا عنوان معروف: الصف الأول بيانات إن كان نصفه أرقاماً أو باركوداً (مثل «6291003000011 | 12.5»)
+  const first = (rows.find((r) => (r || []).some((c) => String(c ?? '').trim() !== '')) || []).filter((c) => String(c ?? '').trim() !== '');
+  const nums = first.filter((c) => !Number.isNaN(asNumber(c))).length;
+  return first.length >= 2 && nums / first.length >= 0.5 ? -1 : rows.findIndex((r) => (r || []).some((c) => String(c ?? '').trim() !== ''));
+}
+
+// يحلل الجدول كاملاً: صف العناوين، تعيين الأعمدة (من العناوين ثم من المحتوى)، وملاحظات للمستخدم
+// rows: كل صفوف الورقة كما قُرئت (بما فيها الفارغة حتى تبقى أرقام الأسطر مطابقة لـExcel)
+export function analyzeTable(rows, type, { headerRow } = {}) {
+  const T = IMPORT_TYPES[type];
+  const isProd = type === 'products';
+  const hr = headerRow != null ? headerRow : findHeaderRow(rows, type);
+  const width = rows.reduce((m, r) => Math.max(m, (r || []).length), 0);
+  const headers = Array.from({ length: width }, (_, i) => (hr >= 0 ? String(((rows[hr] || [])[i]) ?? '').trim() : '') || `عمود ${i + 1}`);
+  const first = hr + 1;
+  const data = rows.slice(first);
+  const rowNos = data.map((_, i) => first + i + 1);
+  const mapping = assignByHeaders(hr >= 0 ? headers.map((h, i) => (h === `عمود ${i + 1}` ? '' : h)) : [], T.fields);
+  const how = Object.fromEntries(Object.keys(mapping).map((k) => [k, 'header']));
+  const notes = [];
+  const prof = headers.map((_, i) => profileColumn(data, i));
+  const used = () => new Set(Object.values(mapping));
+  const drop = (k) => { delete mapping[k]; delete how[k]; };
+
+  // عنوان يقول «سعر» لكن محتواه نصوص (أو العكس): نثق بالمحتوى
+  for (const f of T.fields) {
+    const j = mapping[f.k];
+    if (j == null || !prof[j].n) continue;
+    if (f.num && prof[j].numeric < 0.5) { notes.push(`عمود «${headers[j]}» لا يبدو أرقاماً فلم أستعمله لـ«${f.t}»`); drop(f.k); }
+    else if (f.k === 'name' && prof[j].numeric > 0.8) { notes.push(`عمود «${headers[j]}» أرقام فقط فلم أستعمله اسماً`); drop(f.k); }
+  }
+
+  if (isProd) {
+    // الصنف والمادة معاً: العمود الأقل تنوعاً (قيم مكررة) هو التصنيف والأكثر تنوعاً هو الاسم، بغض النظر عن العنوان
+    if (mapping.name != null && mapping.category != null) {
+      const a = prof[mapping.name]; const b = prof[mapping.category];
+      if (a.n && b.n && a.unique < 0.4 && b.unique > 0.7 && b.unique > a.unique + 0.3) {
+        [mapping.name, mapping.category] = [mapping.category, mapping.name];
+        how.name = how.category = 'content';
+        notes.push(`بدّلتُ بين «${headers[mapping.category]}» و«${headers[mapping.name]}»: الأول قيمه متكررة (تصنيف) والثاني أسماء متنوعة`);
+      }
+    }
+  }
+
+  // تعبئة الحقول الناقصة من محتوى الأعمدة غير المستعملة
+  const free = () => headers.map((_, i) => i).filter((i) => !used().has(i) && prof[i].n > 0);
+  const textual = (i) => prof[i].numeric < 0.3 && !prof[i].barcode;
+  if (isProd) {
+    if (mapping.barcode == null) { const i = free().find((c) => prof[c].barcode); if (i != null) { mapping.barcode = i; how.barcode = 'content'; } }
+    if (mapping.name == null) {
+      const t = free().filter(textual).sort((a, b) => prof[b].unique - prof[a].unique || prof[b].avgLen - prof[a].avgLen)[0];
+      if (t != null && prof[t].unique >= 0.5) { mapping.name = t; how.name = 'content'; }
+    }
+    if (mapping.category == null && mapping.name != null) {
+      const t = free().filter(textual).find((c) => prof[c].uniqueCount >= 2 && prof[c].unique <= 0.45 && prof[c].avgLen <= 40);
+      if (t != null) { mapping.category = t; how.category = 'content'; }
+    }
+    const nums = free().filter((c) => prof[c].numeric >= 0.8 && !prof[c].barcode).sort((a, b) => prof[a].median - prof[b].median);
+    if (mapping.price == null && mapping.cost == null && nums.length >= 2 && prof[nums[0]].median <= prof[nums[1]].median) {
+      mapping.cost = nums[0]; mapping.price = nums[1]; how.cost = how.price = 'content';
+      notes.push(`عمودا الأرقام بلا عناوين واضحة: اعتبرتُ الأقل «سعر الشراء» والأعلى «سعر البيع». راجعهما`);
+    } else if (mapping.price == null && nums.length >= 1 && mapping.cost == null) { mapping.price = nums[0]; how.price = 'content'; }
+    else if (mapping.price == null && mapping.cost != null) { const c = nums.find((x) => prof[x].median >= prof[mapping.cost].median); if (c != null) { mapping.price = c; how.price = 'content'; } }
+    else if (mapping.cost == null && mapping.price != null) { const c = nums.find((x) => prof[x].median <= prof[mapping.price].median); if (c != null) { mapping.cost = c; how.cost = 'content'; } }
+    if (mapping.price != null && mapping.cost != null && prof[mapping.price].n && prof[mapping.cost].n && prof[mapping.cost].median > prof[mapping.price].median) {
+      notes.push('سعر الشراء أعلى من سعر البيع في أغلب الصفوف: تأكد أن عمودي السعرين في مكانهما الصحيح');
+    }
+  } else {
+    if (mapping.name == null) {
+      const t = free().filter(textual).sort((a, b) => prof[b].unique - prof[a].unique)[0];
+      if (t != null && prof[t].unique >= 0.5) { mapping.name = t; how.name = 'content'; }
+    }
+  }
+  return { headerRow: hr, headers, data, rowNos, mapping, how, notes };
 }
 
 // طول رقم الجوال بدون الصفر الأول في الدول التي تكتبه
@@ -79,13 +211,15 @@ function parseTax(v) {
 // الأرقام من Excel قد تأتي نصاً فيه عملة أو فواصل
 const numOrBlank = (v) => {
   if (v === '') return '';
-  const clean = String(v).replace(/[^\d٠-٩۰-۹.,٫\-]/g, '');
+  const x = asNumber(v);
+  if (!Number.isNaN(x)) return x;
+  const clean = String(v).replace(/[^\d٠-٩۰-۹.,٫\-]/g, ''); // نص فيه وحدة بعد الرقم («25 حبة»)
   return clean === '' ? '' : num(clean);
 };
 
 // يحوّل الصفوف إلى سجلات جاهزة، مع المطابقة والأخطاء
 // النتيجة: [{ row, rec, match, action: 'new'|'update'|'error', errors: [] , notes: [] }]
-export function buildRecords(rows, mapping, type, db) {
+export function buildRecords(rows, mapping, type, db, { rowNos } = {}) {
   const T = IMPORT_TYPES[type];
   const isProd = type === 'products';
   const existing = isProd ? db.products : db.parties.filter((p) => p.kind === T.kind);
@@ -124,7 +258,7 @@ export function buildRecords(rows, mapping, type, db) {
     }
     // التكرار داخل الملف نفسه
     const key = isProd ? (v.barcode || (v.sku && 'sku:' + String(v.sku).toLowerCase()) || 'n:' + nameKey(v.name)) : (phoneKey(v.phone) || 'n:' + nameKey(v.name));
-    if (v.name && seen.has(key)) errors.push(`مكرر في الملف (السطر ${seen.get(key) + 2})`);
+    if (v.name && seen.has(key)) errors.push(`مكرر في الملف (السطر ${rowNos ? rowNos[seen.get(key)] : seen.get(key) + 2})`);
     else if (v.name) seen.set(key, idx);
 
     const rec = {};
@@ -162,7 +296,8 @@ export function buildRecords(rows, mapping, type, db) {
       }
     }
     if (match) rec.id = match.id;
-    out.push({ row: idx + 2, rec, match, action: errors.length ? 'error' : match ? 'update' : 'new', errors, notes });
+    if (isProd && rec.price > 0 && rec.cost > 0 && rec.price < rec.cost) notes.push('سعر البيع أقل من سعر الشراء (خسارة)');
+    out.push({ row: rowNos ? rowNos[idx] : idx + 2, rec, match, action: errors.length ? 'error' : match ? 'update' : 'new', errors, notes });
   });
   return out;
 }
