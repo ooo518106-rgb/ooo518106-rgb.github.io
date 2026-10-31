@@ -1,9 +1,9 @@
 // ═══ التحويلات المخزنية بين المستودعات (كميات فقط، التكلفة واحدة للمنشأة) ═══
 import * as store from '../store.js';
-import { docNo, num, round, validateDoc, MAIN_WH } from '../core.js';
+import { docNo, num, round, validateDoc, MAIN_WH, isSerialTracked, serialChoices, serialConflicts, serialKey, lineSerials } from '../core.js';
 import { html, raw, qty, fmtDate, toast, confirmBox, combo, $, $$, field, empty, showErrors } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, S, today, productItems, printPaper, docLocked, lockedNote, lockedPage, lineLots } from './common.js';
+import { head, bindRows, S, today, productItems, printPaper, docLocked, lockedNote, lockedPage, lineTrack, splitSerials } from './common.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 export const whName = (id) => store.getDb().warehouses.find((w) => w.id === id)?.name || (id === MAIN_WH ? 'المستودع الرئيسي' : '—');
@@ -44,13 +44,23 @@ export function form(type, { root, params, query }) {
     <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ التحويل</button></div></form>`);
   const box = $('[data-lines]', root);
   const avail = (pid) => round(whQtyOf(pid, d.from) + (existing && existing.from === d.from ? existing.lines.filter((l) => l.product === pid).reduce((t, l) => t + num(l.qty), 0) : 0), 3);
+  // الأرقام التسلسلية لبند تحويل: رقم لكل قطعة محوَّلة، ويُختار من المتوفر في مستودع المصدر
+  const serialCell = (l, i, p) => {
+    const list = lineSerials(l);
+    const want = num(l.qty);
+    const taken = new Set(list.map(serialKey));
+    const more = serialChoices(store.getBooks(), p.id, d.from).filter((x) => !taken.has(serialKey(x))).slice(0, 300);
+    return html`<div class="serial-line"><textarea class="inp" rows="${Math.min(4, Math.max(2, list.length))}" data-sk dir="ltr" data-f="serials${i}" placeholder="رقم لكل قطعة محوَّلة، واحد في كل سطر" aria-label="الأرقام التسلسلية، بند ${i + 1}">${list.join('\n')}</textarea>
+      <div class="serial-meta"><small class="c-sub ${list.length === want ? '' : 'neg'}" data-scount>الأرقام: ${list.length} من ${want}</small>${more.length ? html`<select class="inp" data-spick aria-label="إضافة رقم من المتوفر، بند ${i + 1}"><option value="">+ من المتوفر (${more.length})</option>${more.map((c) => html`<option value="${c}">${c}</option>`)}</select>` : ''}</div></div><small class="fld-e" data-err="serials${i}" hidden></small>`;
+  };
   function draw() {
     box.innerHTML = String(html`<div class="lines">${d.lines.map((l, i) => { const p = store.findProduct(l.product);
       return html`<div class="adj-line tr-line" data-i="${i}">
         <div class="a-p" data-label="الصنف"><input class="inp" data-p data-f="product${i}" value="${p ? p.name : ''}" placeholder="اختر المنتج"><small class="fld-e" data-err="product${i}" hidden></small></div>
         <div class="a-cur" data-label="المتوفر في المصدر"><b>${p ? qty(avail(p.id)) : '—'}</b></div>
         <div class="a-act" data-label="الكمية"><input class="inp" type="text" inputmode="decimal" data-num data-f="qty${i}" data-q value="${l.qty}"><small class="fld-e" data-err="qty${i}" hidden></small></div>
-        <div class="a-del"><button type="button" class="icon-btn" data-del aria-label="حذف">✕</button></div></div>`; })}</div>`);
+        <div class="a-del"><button type="button" class="icon-btn" data-del aria-label="حذف">✕</button></div>
+        ${p && isSerialTracked(p) ? html`<div class="a-lot" data-label="الأرقام التسلسلية">${serialCell(l, i, p)}</div>` : ''}</div>`; })}</div>`);
     $$('.tr-line', box).forEach((row) => {
       const i = Number(row.dataset.i);
       combo($('[data-p]', row), {
@@ -60,7 +70,27 @@ export function form(type, { root, params, query }) {
       });
     });
   }
-  box.addEventListener('input', (e) => { const row = e.target.closest('.tr-line'); if (row && e.target.matches('[data-q]')) { d.lines[Number(row.dataset.i)].qty = e.target.value; guard.dirty = true; } });
+  const count = (row, l) => { const c = $('[data-scount]', row); if (c) { c.textContent = `الأرقام: ${lineSerials(l).length} من ${num(l.qty)}`; c.classList.toggle('neg', lineSerials(l).length !== num(l.qty)); } };
+  box.addEventListener('input', (e) => {
+    const row = e.target.closest('.tr-line');
+    if (!row) return;
+    const l = d.lines[Number(row.dataset.i)];
+    if (e.target.matches('[data-q]')) { l.qty = e.target.value; guard.dirty = true; count(row, l); }
+    else if (e.target.matches('[data-sk]')) {
+      l.serials = splitSerials(e.target.value);
+      // الكمية تتبع عدد الأرقام المكتوبة
+      if (l.serials.length && num(l.qty) !== l.serials.length) { l.qty = l.serials.length; $('[data-q]', row).value = l.qty; }
+      count(row, l); guard.dirty = true;
+    }
+  });
+  box.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-spick]') || !e.target.value) return;
+    const ta = $('[data-sk]', e.target.closest('.tr-line'));
+    ta.value = splitSerials(ta.value).concat(e.target.value).join('\n');
+    e.target.querySelector(`option[value="${CSS.escape(e.target.value)}"]`)?.remove();
+    e.target.value = '';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   root.addEventListener('change', (e) => { const k = e.target.dataset.k; if (k) { d[k] = e.target.value; guard.dirty = true; if (k === 'from') draw(); } });
   root.addEventListener('input', (e) => { if (e.target.dataset.k === 'notes') d.notes = e.target.value; });
   root.addEventListener('click', (e) => {
@@ -70,8 +100,14 @@ export function form(type, { root, params, query }) {
   });
   $('[data-form]', root).onsubmit = async (e) => {
     e.preventDefault();
-    const doc = { ...d, notes: String(d.notes || '').trim(), lines: d.lines.filter((l) => l.product || l.qty !== '').map((l) => ({ product: l.product, qty: num(l.qty) })) };
-    if (!showErrors(root, validateDoc(store.getDb(), doc))) { toast('راجع الحقول المظللة', 'err'); return; }
+    const doc = { ...d, notes: String(d.notes || '').trim(), lines: d.lines.filter((l) => l.product || l.qty !== '').map((l) => ({ product: l.product, qty: num(l.qty), ...(isSerialTracked(store.findProduct(l.product)) && lineSerials(l).length ? { serials: lineSerials(l) } : {}) })) };
+    const errs = validateDoc(store.getDb(), doc);
+    // الأرقام التسلسلية: لا تُحوَّل إلا قطعة في المخزون
+    if (!Object.keys(errs).length) {
+      const conf = serialConflicts(store.getDb(), doc, existing);
+      for (const c of conf) errs['serials' + c.i] = errs['serials' + c.i] ? `${errs['serials' + c.i]}، ${c.msg}` : c.msg;
+    }
+    if (!showErrors(root, errs)) { toast('راجع الحقول المظللة', 'err'); return; }
     const short = doc.lines.filter((l) => l.qty > avail(l.product));
     if (short.length && !(await confirmBox(`الكمية المحوّلة أكبر من المتوفر في ${whName(doc.from)} لـ ${short.length} صنف. متابعة؟`, { ok: 'حفظ على أي حال' }))) return;
     store.saveDoc(doc);
@@ -90,7 +126,7 @@ export function show(type, { root, params }) {
   setTitle('تحويل مخزني ' + no);
   const locked = docLocked(d);
   const table = html`<table class="tbl" data-table><thead><tr><th>الصنف</th><th class="num">الكمية</th></tr></thead><tbody>
-    ${d.lines.map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineLots(store.getBooks(), d, i) ? html`<small class="c-sub">${lineLots(store.getBooks(), d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)} ${store.findProduct(l.product)?.unit || ''}</td></tr>`)}</tbody></table>`;
+    ${d.lines.map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineTrack(store.getBooks(), d, i) ? html`<small class="c-sub">${lineTrack(store.getBooks(), d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)} ${store.findProduct(l.product)?.unit || ''}</td></tr>`)}</tbody></table>`;
   root.innerHTML = String(html`${head('تحويل مخزني ' + no, { sub: `${fmtDate(d.date)} · من ${whName(d.from)} إلى ${whName(d.to)}`,
     actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة</button>${locked ? '' : html`<a class="btn btn-ghost" href="#/stock-transfers/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
     ${locked ? lockedNote(d) : ''}${d.notes ? html`<p class="muted" style="margin-bottom:10px">${d.notes}</p>` : ''}

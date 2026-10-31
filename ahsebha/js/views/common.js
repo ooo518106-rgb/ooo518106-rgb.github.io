@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { BRAND } from '../brand.js';
 import {
   docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, round, installmentRows, ymd, monthStart, monthEnd, addMonths, addDays,
-  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc,
+  quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc, lineSerials, serialKey,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
 import { go, withQuery, docHref as docHrefOf } from '../nav.js';
@@ -61,11 +61,22 @@ export const accName = (id) => store.findAccount(id)?.name || 'حساب محذو
 
 // ─── الدفعات: نص الدفعة في القوائم، وما سحبه أو أدخله بند المستند (من الدفاتر) ───
 export const lotText = (c) => `${c.lot || 'بدون رقم'}${c.exp ? ' — ينتهي ' + fmtDate(c.exp) : ''}${c.qty != null ? ' — المتوفر ' + qty(c.qty) : ''}`;
-// دفعات بند مستند كنص قصير («دفعة A12 · ينتهي 2027-03-01»)، وفارغ إن لم تكن للمنتج دفعات
-export function lineLots(B, d, i) {
+// تتبّع بند مستند كنص قصير: دفعاته («دفعة A12 · ينتهي 2027-03-01») وأرقامه التسلسلية مع كفالتها إن كان بيعاً («الرقم التسلسلي: A1، A2 · الكفالة حتى …»)،
+// وفارغ إن لم يكن للمنتج تتبع
+export function lineTrack(B, d, i) {
   const ps = (B.lotAlloc && B.lotAlloc.get(`${d.id}:${i}`)) || [];
-  return ps.filter((x) => x.lot || x.exp).map((x) => `${x.lot ? 'دفعة ' + x.lot : 'دفعة'}${x.exp ? ' · ينتهي ' + fmtDate(x.exp) : ''}`).join('، ');
+  const lots = ps.filter((x) => x.lot || x.exp).map((x) => `${x.lot ? 'دفعة ' + x.lot : 'دفعة'}${x.exp ? ' · ينتهي ' + fmtDate(x.exp) : ''}`).join('، ');
+  const l = (d.lines || [])[i];
+  const sn = lineSerials(l);
+  if (!sn.length || !B.serials) return lots;
+  const m = B.serials.get(l.product);
+  const rec = d.type === 'sale' && m ? m.get(serialKey(sn[0])) : null;
+  const warranty = rec && rec.soldDoc === d.id && rec.warrantyEnd ? ` · الكفالة حتى ${fmtDate(rec.warrantyEnd)}` : '';
+  return [lots, `${sn.length === 1 ? 'الرقم التسلسلي' : 'الأرقام التسلسلية'}: ${sn.join('، ')}${warranty}`].filter(Boolean).join(' · ');
 }
+// نص الأرقام التسلسلية المكتوب (سطر لكل رقم، أو بفواصل) إلى قائمة بلا فراغات. splitSerials تُبقي المكرر (ليُنبَّه عليه عند الحفظ)
+export const splitSerials = (t) => String(t || '').split(/[\n\r,;،\t]+/).map((x) => x.trim()).filter(Boolean);
+export const parseSerials = (t) => { const seen = new Set(); return splitSerials(t).filter((x) => { const k = serialKey(x); if (seen.has(k)) return false; seen.add(k); return true; }); };
 
 // ─── مصطلحات تختلف حسب الدولة ───
 const isJO = () => store.getDb()?.settings?.country === 'JO';
@@ -282,7 +293,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
     const X = T.lines[i];
     const p = l.product ? store.findProduct(l.product) : null;
     const nm = l.desc || (p && p.name) || 'بند';
-    const lots = small ? '' : lineLots(store.getBooks(), d, i);
+    const lots = small && !lineSerials(l).length ? '' : lineTrack(store.getBooks(), d, i); // الإيصال المصغّر يحمل الأرقام التسلسلية (إثبات الكفالة) دون الدفعات
     const name = html`${bi && p && p.nameEn && p.nameEn !== nm ? html`${nm}<i class="pp-en"><span dir="ltr">${p.nameEn}</span></i>` : nm}${lots ? html`<i class="pp-lot">${lots}</i>` : ''}`;
     const q = html`${qty(X.qty)}${l.unit ? html` <small class="muted">${l.unit}</small>` : ''}`;
     if (small) return html`<tr><td>${name}</td><td class="num">${q}</td><td class="num">${money(X.price)}</td><td class="num">${money(X.total)}</td></tr>`;

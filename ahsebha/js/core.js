@@ -361,12 +361,13 @@ export const expenseAsDoc = (d) => ({ vatRate: d.vatRate, inclusive: d.inclusive
 
 // ترتيب المستندات: بالتاريخ، ثم الوارد للمخزون قبل الصادر في نفس اليوم، ثم وقت الإنشاء
 const PRIORITY = { opening: 0, purchase: 1, sreturn: 2, adjust: 3, preturn: 4, sale: 5 };
-export function docOrder(a, b) {
-  return (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
-    || ((PRIORITY[a.type] ?? 6) - (PRIORITY[b.type] ?? 6))
-    || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
-    || String(a.id).localeCompare(String(b.id));
-}
+const orderBy = (pr) => (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+  || ((pr[a.type] ?? 6) - (pr[b.type] ?? 6))
+  || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+  || String(a.id).localeCompare(String(b.id));
+export const docOrder = orderBy(PRIORITY);
+// ترتيب توزيع الدفعات والأرقام: كالدفاتر، لكن التحويل بين المستودعات قبل البيع في اليوم نفسه (ليبيع المستودع المستلم ما وصله)
+const trackOrder = orderBy({ ...PRIORITY, stransfer: 3.5 });
 
 // ═══ الرواتب: التأمينات الاجتماعية، صافي الراتب، ومكافأة نهاية الخدمة ═══
 // النسب الافتراضية حسب الدولة (قابلة للتعديل من إعدادات الرواتب)؛ base: bh = الأساسي + السكن، gross = كل البدلات
@@ -492,6 +493,11 @@ export function assetAccum(a, sched, asOf) {
 // حسب الدفعة والمستودع. الوارد يحمل دفعته (line.lot رقمها، line.exp تاريخ انتهائها)، والصادر يسحب الأقرب انتهاءً أولاً (FEFO)
 // إلا إن حدّد البند دفعة بعينها. المنتهي الصلاحية لا يُباع ولا يُحوَّل تلقائياً. الرصيد بلا دفعة (ما قبل تفعيل التتبع) يُسحب أولاً.
 export const isLotTracked = (p) => !!p && p.type === 'stock' && p.track === 'lot';
+// ═══ الأرقام التسلسلية والكفالة (product.track === 'serial'): لكل قطعة رقمها، وسجلها: دخلت، بيعت لمن ومتى، وكفالتها ═══
+// طبقة تتبع مثل الدفعات: line.serials = [رقم لكل قطعة] في كل بند يحرّك المخزون، وتُحسب حالة كل رقم بعد بناء القيود (books.serials)
+export const isSerialTracked = (p) => !!p && p.type === 'stock' && p.track === 'serial';
+export const serialKey = (s) => String(s == null ? '' : s).trim().toUpperCase();
+export const lineSerials = (l) => (l && Array.isArray(l.serials) ? l.serials : []).map((x) => String(x == null ? '' : x).trim()).filter(Boolean);
 export const lotExpired = (r, date) => !!r.exp && r.exp < date;
 const lotKey = (wh, lot, exp) => `${wh}|${lot}|${exp}`;
 const cleanLot = (v) => String(v == null ? '' : v).trim().slice(0, 60);
@@ -543,7 +549,12 @@ export function buildBooks(db, opts = {}) {
   const lotRecs = new Map(); // منتج ← (مستودع|دفعة|انتهاء ← سجل الدفعة)
   const lotAlloc = new Map(); // `${مستند}:${بند}` ← [{ lot, exp, wh, qty }]
   const retTaken = new Map(); // ما أُرجع من كل جزء سحبته فاتورة بيع، فلا يُرجَع لدفعتها أكثر مما سحبته
-  const lotEvents = []; // حركات المنتجات المتتبَّعة بترتيب الدفاتر؛ تُوزَّع على الدفعات بعد بناء القيود (انظر distributeLots)
+  // الأرقام التسلسلية: منتج ← (الرقم بحروف كبيرة ← سجله {serial, status: 'in'|'sold'|'out', wh, soldDoc, soldDate, party, warrantyEnd, events})
+  const serialled = new Set((db.products || []).filter(isSerialTracked).map((p) => p.id));
+  const serialRecs = new Map();
+  const serialIssues = [];
+  const tracked = (id) => lotted.has(id) || serialled.has(id);
+  const lotEvents = []; // حركات المنتجات المتتبَّعة بترتيب الدفاتر؛ تُوزَّع على الدفعات والأرقام بعد بناء القيود (انظر distributeTracked)
   const lotIssues = []; // سحب بأكثر من رصيد الدفعات (لا يُعدّ من ملاحظات القيود في issues، وتعرضه صفحة الدفعات)
   let lotSeq = 0;
   const lotsOf = (pid) => { let m = lotRecs.get(pid); if (!m) lotRecs.set(pid, m = new Map()); return m; };
@@ -627,10 +638,50 @@ export function buildBooks(db, opts = {}) {
     const line = i >= 0 ? (d.lines || [])[i] : null;
     lotAlloc.set(`${d.id}:${i}`, lotTake(p, d, line, q, whOf(d)));
   }
-  // توزيع الحركات على الدفعات بعد انتهاء بناء القيود، بالترتيب نفسه إلا مرتجع مبيعات بفاتورة من اليوم نفسه: يُعالَج بعد فاتورته
+  // ── الأرقام التسلسلية: دخول (شراء، مرتجع بيع، زيادة جرد، رصيد افتتاحي)، وخروج (بيع، مرتجع مورد، نقص جرد)، وانتقال بين المستودعات ──
+  const serialsOf = (pid) => { let m = serialRecs.get(pid); if (!m) serialRecs.set(pid, m = new Map()); return m; };
+  const evOf = (d, t, extra = {}) => ({ t, doc: d.id, type: d.type, no: d.no, date: d.date, party: d.party || '', ...extra });
+  function serialIn(p, d, i, q) {
+    const wh = whOf(d);
+    const list = d.type === 'opening' ? (Array.isArray(p.openSerials) ? p.openSerials : []).map((x) => String(x == null ? '' : x).trim()).filter(Boolean).slice(0, Math.floor(q)) : lineSerials((d.lines || [])[i]);
+    const m = serialsOf(p.id);
+    for (const s of list) {
+      const key = serialKey(s);
+      let r = m.get(key);
+      if (r && r.status === 'in') { serialIssues.push({ doc: d.id, product: p.id, serial: r.serial, msg: 'الرقم التسلسلي موجود في المخزون مسبقاً' }); continue; }
+      if (!r) m.set(key, r = { product: p.id, serial: s, status: 'in', wh, events: [] });
+      Object.assign(r, { status: 'in', wh, soldDoc: '', soldDate: '', party: '', warrantyEnd: '' });
+      r.events.push(evOf(d, d.type === 'sreturn' ? 'return' : d.type === 'opening' ? 'opening' : 'in', { wh }));
+    }
+  }
+  function serialOut(p, d, i) {
+    const wh = whOf(d);
+    const months = Math.max(0, Math.floor(num(p.warrantyMonths)));
+    const m = serialsOf(p.id);
+    for (const s of lineSerials((d.lines || [])[i])) {
+      const key = serialKey(s);
+      let r = m.get(key);
+      if (!r) { m.set(key, r = { product: p.id, serial: s, status: 'in', wh, events: [] }); serialIssues.push({ doc: d.id, product: p.id, serial: s, msg: 'الرقم التسلسلي لم يُسجَّل دخوله للمخزون' }); }
+      else if (r.status !== 'in') serialIssues.push({ doc: d.id, product: p.id, serial: r.serial, msg: r.status === 'sold' ? 'الرقم التسلسلي مباع مسبقاً' : 'الرقم التسلسلي خرج من المخزون مسبقاً' });
+      if (d.type === 'sale') Object.assign(r, { status: 'sold', soldDoc: d.id, soldDate: d.date, party: d.party || '', warrantyEnd: months ? addMonths(d.date, months) : '' });
+      else r.status = 'out';
+      r.events.push(evOf(d, d.type === 'sale' ? 'sale' : d.type === 'preturn' ? 'preturn' : 'adjust', { wh }));
+    }
+  }
+  function serialMove(p, d, i) {
+    const m = serialsOf(p.id);
+    for (const s of lineSerials((d.lines || [])[i])) {
+      const r = m.get(serialKey(s));
+      if (!r || r.status !== 'in') { serialIssues.push({ doc: d.id, product: p.id, serial: s, msg: 'الرقم التسلسلي غير متوفر للتحويل' }); continue; }
+      r.wh = d.to;
+      r.events.push(evOf(d, 'transfer', { from: d.from, wh: d.to }));
+    }
+  }
+
+  // توزيع الحركات على الدفعات والأرقام بعد انتهاء بناء القيود، بالترتيب نفسه إلا مرتجع مبيعات بفاتورة من اليوم نفسه: يُعالَج بعد فاتورته
   // (في الدفاتر الوارد قبل الصادر في اليوم الواحد، فلولا هذا لما عرف المرتجع دفعات فاتورته ودخل «بلا دفعة»)
-  function distributeLots(docs) {
-    const at = new Map(docs.map((d, k) => [d.id, k]));
+  function distributeTracked(docs) {
+    const at = new Map([...docs].sort(trackOrder).map((d, k) => [d.id, k]));
     const rank = (d) => {
       if (d.type === 'sreturn' && d.refId) {
         const ref = docById.get(d.refId);
@@ -640,7 +691,11 @@ export function buildBooks(db, opts = {}) {
     };
     const order = lotEvents.map((e, n) => ({ e, r: rank(e.d), n })).sort((a, b) => a.r - b.r || a.n - b.n);
     for (const { e } of order) {
-      if (e.t === 'in') lotIn(e.p, e.d, e.i, e.q);
+      if (serialled.has(e.p.id)) {
+        if (e.t === 'in') serialIn(e.p, e.d, e.i, e.q);
+        else if (e.t === 'out') serialOut(e.p, e.d, e.i);
+        else serialMove(e.p, e.d, e.i);
+      } else if (e.t === 'in') lotIn(e.p, e.d, e.i, e.q);
       else if (e.t === 'out') lotOut(e.p, e.d, e.i, e.q);
       else {
         const pieces = lotTake(e.p, e.d, e.d.lines[e.i], e.q, e.d.from);
@@ -678,7 +733,7 @@ export function buildBooks(db, opts = {}) {
     }
     if (q > 0) s.last = val / q;
     whAdd(p.id, whOf(d), q);
-    if (lotted.has(p.id)) lotEvents.push({ t: 'in', p, d, i, q });
+    if (tracked(p.id)) lotEvents.push({ t: 'in', p, d, i, q });
     move(p, d, i, q, val, s, variance);
     return variance;
   }
@@ -692,7 +747,7 @@ export function buildBooks(db, opts = {}) {
     if (s.qty === 0 && s.value !== 0) { cost = R(cost + s.value); s.value = 0; }
     if (s.qty < 0) issues.push({ doc: d.id, product: p.id, msg: 'رصيد المخزون صار سالباً' });
     whAdd(p.id, whOf(d), -q);
-    if (lotted.has(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
+    if (tracked(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
     move(p, d, i, -q, -cost, s);
     return { cost, unit };
   }
@@ -705,7 +760,7 @@ export function buildBooks(db, opts = {}) {
     let residue = 0;
     if (s.qty === 0 && s.value !== 0) { residue = s.value; s.value = 0; }
     whAdd(p.id, whOf(d), -q);
-    if (lotted.has(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
+    if (tracked(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
     move(p, d, i, -q, -val, s, residue);
     return residue;
   }
@@ -996,7 +1051,7 @@ export function buildBooks(db, opts = {}) {
       whAdd(p.id, d.from, -q);
       whAdd(p.id, d.to, q);
       // الدفعات تنتقل مع الكمية: تُسحب من المصدر وتصل المستودع الآخر بنفس رقمها وتاريخها
-      if (lotted.has(p.id)) lotEvents.push({ t: 'xfer', p, d, i, q });
+      if (tracked(p.id)) lotEvents.push({ t: 'xfer', p, d, i, q });
       whMoves.push({ product: p.id, doc: d.id, no: d.no, date: d.date, from: d.from, to: d.to, qty: q });
     });
   }
@@ -1091,7 +1146,7 @@ export function buildBooks(db, opts = {}) {
   }
   const docs = [opening, ...(db.docs || []).filter((d) => handlers[d.type] && d.type !== 'opening' && !DOC_TYPES[d.type]?.virtual), ...virtual].sort(docOrder);
   for (const d of docs) handlers[d.type](d);
-  if (lotEvents.length) distributeLots(docs);
+  if (lotEvents.length) distributeTracked(docs);
 
   // ── مطابقة الدفعات مع الفواتير: الربط الصريح أولاً ثم الأقدم فالأقدم ──
   const remaining = new Map();
@@ -1157,7 +1212,7 @@ export function buildBooks(db, opts = {}) {
   const cancelled = new Map();
   for (const d of db.docs || []) if (d.type === 'sreturn' && d.cancels && d.refId) cancelled.set(d.refId, d.id);
 
-  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves, cancelled, lots: lotRecs, lotAlloc, lotIssues, lotValid };
+  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves, cancelled, lots: lotRecs, lotAlloc, lotIssues, lotValid, serials: serialRecs, serialIssues };
 }
 
 // ═══ الإرجاع والإلغاء والمخزون السالب ═══
@@ -1181,6 +1236,9 @@ export function returnLines(db, ref, type, exceptId = null) {
   const prior = (db.docs || []).some((x) => x.type === type && x.refId === ref.id && x.id !== exceptId);
   const take = new Map();
   const lines = [];
+  // الأرقام التسلسلية التي أُرجعت من قبل بمرتجعات سابقة على هذه الفاتورة لا تُنسخ ثانية
+  const back = new Set();
+  for (const x of db.docs || []) if (x.refId === ref.id && x.type === type && x.id !== exceptId) for (const l of x.lines || []) for (const sn of lineSerials(l)) back.add(serialKey(sn));
   for (const l of ref.lines || []) {
     if (!l.product) { if (!prior) lines.push({ ...l }); continue; }
     const f = lineFactor(l);
@@ -1188,7 +1246,8 @@ export function returnLines(db, ref, type, exceptId = null) {
     const q = Math.min(num(l.qty), room > 0 ? round(room / f, 6) : 0);
     if (!(q > 0)) continue;
     take.set(l.product, round((take.get(l.product) || 0) + q * f, 3));
-    lines.push({ ...l, qty: q });
+    const sn = lineSerials(l);
+    lines.push({ ...l, qty: q, ...(sn.length ? { serials: sn.filter((x) => !back.has(serialKey(x))).slice(0, Math.round(q * f)) } : {}) });
   }
   return lines;
 }
@@ -1275,6 +1334,68 @@ export function installmentRows(doc, open, dec = 2) {
     r.left = round(r.amount - paid, dec);
   }
   return rows;
+}
+
+// أرقام منتج في المخزون الآن (للاختيار في بنود البيع والمرتجع والتسوية): مرتبة، وبمستودع معيّن أو في كل المستودعات
+export function serialChoices(books, pid, wh = null) {
+  const out = [];
+  const m = books.serials && books.serials.get(pid);
+  if (m) for (const r of m.values()) if (r.status === 'in' && (!wh || r.wh === wh)) out.push(r.serial);
+  return out.sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+}
+
+// أرقام المستند التي تتعارض مع السجل (قبل الحفظ): الوارد يكون الرقم فيه في المخزون مسبقاً، والصادر لا يكون فيه (kind: dup-in، unknown
+// لم يُسجَّل دخوله، sold مباع، gone خرج)، أو رقم مكرر داخل المستند. يُحسب بدفاتر خالية من أثر المستند نفسه عند تعديله
+export function serialConflicts(db, doc, existing = null) {
+  const products = new Map((db.products || []).map((p) => [p.id, p]));
+  const lines = (doc && doc.lines) || [];
+  if (!lines.some((l) => isSerialTracked(products.get(l.product)) && lineSerials(l).length)) return [];
+  const base = existing && existing.id ? { ...db, docs: (db.docs || []).filter((x) => x.id !== existing.id) } : db;
+  const B = buildBooks(base);
+  const out = [];
+  const seen = new Set();
+  lines.forEach((l, i) => {
+    const p = products.get(l.product);
+    if (!isSerialTracked(p)) return;
+    const incoming = doc.type === 'purchase' || doc.type === 'sreturn' || (doc.type === 'adjust' && num(l.qty) > 0);
+    for (const sn of lineSerials(l)) {
+      const key = serialKey(sn);
+      const rec = B.serials.get(p.id) ? B.serials.get(p.id).get(key) : null;
+      const dup = `${p.id}\u0001${key}`;
+      if (seen.has(dup)) out.push({ i, serial: sn, kind: 'dup-doc', msg: `الرقم ${sn} مكرر في المستند` });
+      seen.add(dup);
+      if (incoming) { if (rec && rec.status === 'in') out.push({ i, serial: sn, kind: 'dup-in', msg: `الرقم ${sn} موجود في المخزون مسبقاً` }); }
+      else if (!rec) out.push({ i, serial: sn, kind: 'unknown', msg: `الرقم ${sn} غير مسجَّل في المخزون` });
+      else if (rec.status === 'sold') out.push({ i, serial: sn, kind: 'sold', msg: `الرقم ${sn} مباع مسبقاً` });
+      else if (rec.status === 'out') out.push({ i, serial: sn, kind: 'gone', msg: `الرقم ${sn} خرج من المخزون (مرتجع للمورد أو إتلاف)` });
+    }
+  });
+  return out;
+}
+
+// تقرير الأرقام التسلسلية: كل رقم بحالته (في المخزون، مباع، خرج) وسجل حركته، وكفالة المباع: سارية، تنتهي خلال alertDays يوماً، منتهية
+export function serialReport(db, books, { today = ymd(), alertDays = 30 } = {}) {
+  const products = new Map((db.products || []).map((p) => [p.id, p]));
+  const parties = new Map((db.parties || []).map((p) => [p.id, p]));
+  const rows = [];
+  for (const [pid, m] of books.serials || []) {
+    const p = products.get(pid);
+    if (!p) continue;
+    for (const r of m.values()) {
+      const first = r.events.find((x) => x.t === 'in' || x.t === 'opening' || x.t === 'return') || r.events[0] || null;
+      const days = r.status === 'sold' && r.warrantyEnd ? daysBetween(today, r.warrantyEnd) : null;
+      const warranty = days == null ? 'none' : days < 0 ? 'expired' : days <= alertDays ? 'soon' : 'active';
+      rows.push({ product: p, serial: r.serial, status: r.status, wh: r.wh, inDate: first ? first.date : '', inDoc: first ? first.doc : '', soldDoc: r.soldDoc || '', soldDate: r.soldDate || '', party: r.party || '', partyName: (parties.get(r.party) || {}).name || '', warrantyEnd: r.warrantyEnd || '', days, warranty, events: r.events });
+    }
+  }
+  rows.sort((a, b) => a.product.name.localeCompare(b.product.name, 'ar') || a.serial.localeCompare(b.serial, 'en', { numeric: true }));
+  const count = (f) => rows.filter(f).length;
+  return {
+    rows, alertDays,
+    inStock: count((r) => r.status === 'in'), sold: count((r) => r.status === 'sold'), gone: count((r) => r.status === 'out'),
+    active: count((r) => r.warranty === 'active'), soon: count((r) => r.warranty === 'soon'), expired: count((r) => r.warranty === 'expired'),
+    issues: (books.serialIssues || []).length,
+  };
 }
 
 // نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله).
@@ -1752,6 +1873,27 @@ export function base64(bytes) {
 // الرقم الضريبي السعودي: 15 رقماً يبدأ وينتهي بـ 3
 export const validSaudiVat = (v) => /^3\d{13}3$/.test(String(v || '').trim());
 
+// بند منتج بأرقام تسلسلية: عدد الأرقام يساوي الكمية (قطعاً صحيحة) بلا تكرار، وفي المستند كله. الفاتورة القديمة التي سبقت التتبع
+// (لا أرقام فيها أصلاً) تُعدَّل بلا إلزام. seen: الأرقام المكتوبة في بنود المستند لكل منتج
+function serialRules(e, p, l, i, d, db, seen) {
+  if (!isSerialTracked(p)) return;
+  const list = lineSerials(l);
+  if (!list.length && d.id) {
+    const old = (db.docs || []).find((x) => x.id === d.id);
+    if (old && !(old.lines || []).some((x) => x.product === l.product && lineSerials(x).length)) return;
+  }
+  const base = round(Math.abs(num(l.qty)) * lineFactor(l), 6);
+  if (!Number.isInteger(base)) { e['qty' + i] = 'كمية المنتج ذي الرقم التسلسلي عدد صحيح'; return; }
+  if (list.length !== base) { e['serials' + i] = `اكتب ${base} ${base === 1 ? 'رقماً تسلسلياً واحداً' : 'أرقام تسلسلية'} (المكتوب ${list.length})`; return; }
+  if (!seen.has(p.id)) seen.set(p.id, new Set());
+  const mine = seen.get(p.id);
+  for (const x of list) {
+    const k = serialKey(x);
+    if (mine.has(k)) { e['serials' + i] = `رقم مكرر: ${x}`; return; }
+    mine.add(k);
+  }
+}
+
 // حقول الدفعة في بند منتج متتبَّع: تاريخ الانتهاء صحيح، والشراء لا يدخل المخزون بلا دفعة ولا تاريخ (need)
 function lotRules(e, p, l, i, need) {
   if (!isLotTracked(p)) return;
@@ -1793,8 +1935,10 @@ export function validateDoc(db, d) {
     const lines = d.lines || [];
     if (!lines.length) e.lines = 'أضف بنداً واحداً على الأقل';
     const pm = new Map((db.products || []).map((p) => [p.id, p]));
+    const seenSerials = new Map();
     lines.forEach((l, i) => {
       lotRules(e, pm.get(l.product), l, i, d.type === 'purchase');
+      if (!NO_POSTING.includes(d.type)) serialRules(e, pm.get(l.product), l, i, d, db, seenSerials);
       if (!(num(l.qty) > 0)) e['qty' + i] = 'الكمية أكبر من صفر';
       if (l.factor != null && l.factor !== '' && !(num(l.factor) > 0)) e['qty' + i] = 'معامل الوحدة غير صحيح';
       if (num(l.price) < 0) e['price' + i] = 'السعر لا يكون سالباً';
@@ -1924,13 +2068,16 @@ export function validateDoc(db, d) {
     if (d.from && d.from === d.to) e.to = 'اختر مستودعاً مختلفاً';
     const lines = d.lines || [];
     if (!lines.length) e.lines = 'أضف منتجاً واحداً على الأقل';
+    const seenTr = new Map();
     lines.forEach((l, i) => {
       const p = (db.products || []).find((x) => x.id === l.product);
       if (!p || p.type !== 'stock') e['product' + i] = 'اختر منتجاً مخزنياً';
       if (!(num(l.qty) > 0)) e['qty' + i] = 'الكمية أكبر من صفر';
+      serialRules(e, p, l, i, d, db, seenTr);
     });
   } else if (d.type === 'adjust') {
     const lines = d.lines || [];
+    const seenAdj = new Map();
     if (!lines.length) e.lines = 'أضف منتجاً واحداً على الأقل';
     lines.forEach((l, i) => {
       const p = (db.products || []).find((x) => x.id === l.product);
@@ -1938,6 +2085,7 @@ export function validateDoc(db, d) {
       if (!num(l.qty)) e['qty' + i] = 'الفرق لا يكون صفراً';
       if (l.cost !== '' && l.cost != null && num(l.cost) < 0) e['cost' + i] = 'التكلفة لا تكون سالبة';
       lotRules(e, p, l, i, false);
+      serialRules(e, p, l, i, d, db, seenAdj);
     });
   }
   return e;
