@@ -1,0 +1,1 @@
+{"name":"kenz-data-services","private":true,"type":"module","scripts":{"test":"node --test ../ahsebha/test/cloud-worker.test.mjs"}}

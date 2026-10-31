@@ -1,0 +1,16 @@
+name = "kenz-data-services"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+APP_ORIGIN = "https://ooo518106-rgb.github.io"
+
+[[durable_objects.bindings]]
+name = "COMPANIES"
+class_name = "CompanySnapshot"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CompanySnapshot"]
+
+# SYNC_TOKEN: يضاف بأمر wrangler secret put SYNC_TOKEN؛ لا تضعه بهذا الملف.

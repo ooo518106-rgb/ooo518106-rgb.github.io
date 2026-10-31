@@ -121,6 +121,7 @@ export function view({ root }) {
         ${store.usedFileIds().size ? html`<button class="btn btn-ghost" data-backup-enc-full>🔐 كاملة مشفّرة مع المرفقات</button>` : ''}
         ${can('admin') ? html`<label class="btn btn-ghost">📂 استعادة من ملف<input type="file" accept=".json,.zip,application/json,application/zip" data-restore hidden></label>` : ''}</div>
       ${store.usedFileIds().size ? html`<p class="muted small" style="margin-top:8px">النسخة العادية (.json) فيها كل البيانات بدون صور المرفقات وحجمها صغير. النسخة الكاملة (.zip) فيها الصور كمان.</p>` : ''}
+      ${can('admin') ? html`<p style="margin-top:12px"><a class="btn btn-ghost" href="#/data-services">إعداد النسخ الخارجية التلقائية والمزامنة</a></p>` : ''}
       <p class="muted small" style="margin-top:10px" data-storage></p></div>
 
     ${can('admin') ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>🕘 نسخ تلقائية على هذا الجهاز</h3></div>
@@ -326,7 +327,7 @@ export function view({ root }) {
 
 
 // ─── النسخ التلقائية على الجهاز: قائمة واستعادة وتنزيل وحذف ───
-const snapLabel = (m) => (m.id.startsWith('d:') ? `حالة البيانات أول استعمال يوم ${fmtDate(m.id.slice(2))}` : m.id === 'before-replace' ? 'الحالة قبل آخر استبدال للبيانات (استعادة أو استيراد أو بيانات تجريبية)' : m.id);
+const snapLabel = (m) => (m.id.startsWith('d:') ? `حالة البيانات أول استعمال يوم ${fmtDate(m.id.slice(2))}` : m.id === 'before-replace' ? 'الحالة قبل آخر استبدال للبيانات (استعادة أو استيراد أو بيانات تجريبية)' : m.id === 'before-cloud-restore' ? 'نسخة الرجوع قبل سحب بيانات الخادم' : m.id);
 const sizeLabel = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} م.ب` : `${Math.max(1, Math.round(b / 1024))} ك.ب`);
 async function drawSnaps(root) {
   const box = $('[data-snaps]', root);
@@ -363,3 +364,4 @@ async function drawSnaps(root) {
     } catch (err) { toast(err.message, 'err'); }
   };
 }
+
