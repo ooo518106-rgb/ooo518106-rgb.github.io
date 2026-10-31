@@ -24,7 +24,7 @@ export function list(kind, { root, query }) {
     if (!lateOf.has(p.id)) {
       lateOf.set(p.id, (B.openItems.get(p.id) || []).filter((it) => it.side === 'c').reduce((t, it) => {
         const d = docOf(it.doc, B);
-        return d && d.dueDate && d.dueDate < today() ? t + it.open : t;
+        return (it.due || (d && d.dueDate)) && (it.due || d.dueDate) < today() ? t + it.open : t;
       }, 0));
     }
     return lateOf.get(p.id);
@@ -127,7 +127,7 @@ export function show(kind, { root, params, query, path }) {
   const bal = B.partyBalance.get(p.id) || 0;
   const docs = db.docs.filter((d) => d.party === p.id).sort((a, b) => b.date.localeCompare(a.date));
   const open = (B.openItems.get(p.id) || []).filter((it) => it.side === 'c');
-  const late = open.reduce((t, it) => { const d = docOf(it.doc, B); return d && d.dueDate && d.dueDate < today() ? t + it.open : t; }, 0);
+  const late = open.reduce((t, it) => { const d = docOf(it.doc, B); const dueOn = it.due || (d && d.dueDate); return dueOn && dueOn < today() ? t + it.open : t; }, 0);
   const salesType = kind === 'customer' ? 'sale' : 'purchase';
   const yearStart = today().slice(0, 4) + '-01-01';
   const volume = docs.filter((d) => d.type === salesType && d.date >= yearStart).reduce((t, d) => t + (B.totals.get(d.id)?.total || 0), 0);
@@ -173,9 +173,9 @@ export function show(kind, { root, params, query, path }) {
     $('[data-csv]', box).onclick = () => exportTable($('[data-table]', box), csvName('كشف حساب ' + p.name));
   } else if (tab === 'open') {
     box.innerHTML = String(open.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>المستند</th><th>التاريخ</th><th>الاستحقاق</th><th class="num">المتبقي</th><th>التأخير</th></tr></thead><tbody>
-      ${open.map((it) => { const d = docOf(it.doc, B); const dueOn = (d && d.dueDate) || it.date; const lateDays = daysBetween(dueOn, today());
-        return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td dir="ltr" class="nowrap">${d ? docNo(d, s) : 'رصيد افتتاحي'}</td><td>${fmtDate(it.date)}</td><td>${d && d.dueDate ? fmtDate(d.dueDate) : '—'}</td><td class="num"><b>${money(it.open)}</b></td>
-          <td>${lateDays > 0 && d && d.dueDate ? html`<span class="badge badge-bad">${lateDays} يوم</span>` : html`<span class="badge badge-muted">غير متأخر</span>`}</td></tr>`; })}
+      ${open.map((it) => { const d = docOf(it.doc, B); const hasDue = it.due || (d && d.dueDate); const dueOn = hasDue || it.date; const lateDays = daysBetween(dueOn, today());
+        return html`<tr ${d ? attr('data-href', docHref(d)) : ''}><td dir="ltr" class="nowrap">${d ? docNo(d, s) : 'رصيد افتتاحي'}${it.inst ? html` <small class="muted">قسط ${it.inst}</small>` : ''}</td><td>${fmtDate(it.date)}</td><td>${hasDue ? fmtDate(hasDue) : '—'}</td><td class="num"><b>${money(it.open)}</b></td>
+          <td>${lateDays > 0 && hasDue ? html`<span class="badge badge-bad">${lateDays} يوم</span>` : html`<span class="badge badge-muted">غير متأخر</span>`}</td></tr>`; })}
       </tbody></table></div>` : empty('✅', 'لا توجد مبالغ غير مسددة'));
   } else {
     box.innerHTML = String(docs.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>التاريخ</th><th class="num">المبلغ</th><th>الحالة</th></tr></thead><tbody>

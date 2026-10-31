@@ -22,7 +22,7 @@ export function receivables(db, B, asOf) {
     for (const it of B.openItems.get(p.id) || []) {
       if (it.side === 's') continue;
       const d = docs.get(it.doc);
-      const due = (d && d.dueDate) || it.date;
+      const due = it.due || (d && d.dueDate) || it.date;
       if (due < asOf) overdue += it.open;
       if (!oldest || due < oldest) oldest = due;
       items.push({ doc: d, date: it.date, due, open: it.open });

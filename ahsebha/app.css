@@ -362,6 +362,19 @@ textarea.inp { min-height: 76px; resize: vertical; line-height: 1.6; }
 .pos-totals .row { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
 .pos-totals .grand { font-size: 1.3rem; font-weight: 900; }
 .pos-disc { display: flex; justify-content: flex-start; }
+
+/* ─── الأقساط: نموذج الفاتورة وصفحتها وورقتها المطبوعة ─── */
+.inst-gen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+.inst-n { color: var(--text-muted); font-size: .8rem; text-align: center; }
+.inst-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 36px; gap: 8px; align-items: center; margin-bottom: 6px; }
+.inst-sum { margin: 10px 0; font-size: .9rem; }
+.inst-sum.ok { color: var(--ok-fg); font-weight: 700; }
+.inst-sum.neg { color: var(--neg); font-weight: 700; }
+@media (max-width: 520px) { .inst-gen { grid-template-columns: 1fr 1fr; } .inst-row { grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1fr) 30px; gap: 6px; } }
+.pp-inst { margin-top: 10px; font-size: .85em; }
+.pp-inst h4 { margin-bottom: 4px; }
+.pp-inst table { width: 100%; border-collapse: collapse; }
+.pp-inst td { padding: 2px 6px; border-bottom: 1px solid #e5e7eb; }
 .pos-actions { padding: 10px; border-top: 1px solid var(--border); display: grid; gap: 8px; }
 .pos-pay { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; border: 0; border-radius: 12px; font: inherit; font-weight: 900; font-size: 1.05rem; color: #fff; cursor: pointer; transition: filter .15s; }
 .pos-pay:hover { filter: brightness(1.08); }

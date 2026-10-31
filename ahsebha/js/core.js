@@ -977,7 +977,13 @@ export function buildBooks(db, opts = {}) {
       const kind = d.type === 'sale' ? 'customer' : 'supplier';
       const due = partyOf(d, kind) ? (remaining.get(d.id) ?? 0) : R(total - payOf(d, total).paid);
       const paid = R(total - due);
-      status.set(d.id, { total, paid, due, state: due <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid' });
+      // فاتورة بأقساط: أول قسط غير مسدد (nextDue) ومجموع المتأخر منها (lateAmt)
+      const inst = d.installments && due > 0 ? installmentRows(d, due, dec) : null;
+      const left = inst ? inst.filter((r) => r.left > 0) : [];
+      status.set(d.id, {
+        total, paid, due, state: due <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        ...(left.length ? { nextDue: left[0].due, lateAmt: R(left.filter((r) => r.due < today).reduce((s, r) => s + r.left, 0)) } : {}),
+      });
     } else if (d.type === 'sreturn' || d.type === 'preturn') {
       const kind = d.type === 'sreturn' ? 'customer' : 'supplier';
       const open = partyOf(d, kind) ? (remaining.get(d.id) ?? 0) : 0;
@@ -987,6 +993,20 @@ export function buildBooks(db, opts = {}) {
       const open = d.party ? (remaining.get(d.id) ?? 0) : 0;
       status.set(d.id, { total: amount, applied: R(amount - open), open });
     }
+  }
+
+  // أقساط الفواتير: الجزء المفتوح من فاتورة لها أقساط يتوزع على أقساطها، فلكل جزء استحقاقه (it.due) ورقمه (it.inst)
+  for (const [pid, items] of openItems) {
+    if (!items.some((it) => it.side === 'c' && docById.get(it.doc)?.installments)) continue;
+    const out = [];
+    for (const it of items) {
+      const d = it.side === 'c' && it.key === it.doc ? docById.get(it.doc) : null;
+      const rows = d && d.installments ? installmentRows(d, it.open, dec) : null;
+      const left = rows ? rows.filter((r) => r.left > 0) : [];
+      if (!left.length) out.push(it);
+      else for (const r of left) out.push({ ...it, open: r.left, due: r.due, inst: r.n });
+    }
+    openItems.set(pid, out);
   }
 
   // الفواتير الملغاة: فاتورة لها إشعار دائن (cancels) يعكسها كاملة
@@ -1092,6 +1112,25 @@ export function listPrice(db, product, listId, unit = null) {
   if (explicit == null && own != null && own !== '' && num(own) >= 0) return unit ? round(num(own) * f, 4) : num(own);
   const pct = num(list.pct);
   return pct ? round(plain * Math.max(0, 1 + pct / 100), dec) : plain;
+}
+
+// أقساط الفاتورة: doc.installments = [{ due, amount }] مجموعها = ما يُترك آجلاً عند الإصدار (الإجمالي ناقص المدفوع فوراً).
+// الجزء المتبقي من الفاتورة (open) يوزَّع على أقساطها بترتيب الاستحقاق: ما سُدِّد بعد الإصدار (سندات أو مرتجعات) يغطي الأقدم أولاً
+export function installmentRows(doc, open, dec = 2) {
+  const list = Array.isArray(doc && doc.installments) ? doc.installments : [];
+  if (!list.length) return null;
+  const rows = list.map((x, i) => ({ i, due: x.due, amount: round(num(x.amount), dec) }))
+    .sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.i - b.i))
+    .map((r, k) => ({ n: k + 1, due: r.due, amount: r.amount }));
+  const covered = round(rows.reduce((s, r) => s + r.amount, 0), dec);
+  let settled = Math.max(0, round(covered - Math.max(0, num(open)), dec));
+  for (const r of rows) {
+    const paid = Math.min(r.amount, settled);
+    settled = round(settled - paid, dec);
+    r.paid = round(paid, dec);
+    r.left = round(r.amount - paid, dec);
+  }
+  return rows;
 }
 
 // نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله)
@@ -1308,7 +1347,7 @@ export function aging(db, books, kind, asOf) {
     for (const it of books.openItems.get(p.id) || []) {
       if (it.side === 's') { r.credit -= it.open; continue; }
       const d = docs.get(it.doc);
-      const due = (d && d.dueDate) || it.date;
+      const due = it.due || (d && d.dueDate) || it.date;
       const late = daysBetween(due, asOf);
       const b = late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'd90p';
       r[b] += it.open;
@@ -1466,7 +1505,7 @@ export function dashboard(db, books, today) {
     if (t === 'revenue') s.revenue += p.cr - p.dr; else s.expenses += p.dr - p.cr;
   }
   for (const s of series) { s.revenue = R(s.revenue); s.expenses = R(s.expenses); s.profit = R(s.revenue - s.expenses); }
-  const overdue = (db.docs || []).filter((d) => d.type === 'sale' && d.dueDate && d.dueDate < today && (books.status.get(d.id)?.due || 0) > 0);
+  const overdue = (db.docs || []).filter((d) => { const st = books.status.get(d.id); return d.type === 'sale' && (st?.nextDue || d.dueDate) && (st?.nextDue || d.dueDate) < today && (st?.due || 0) > 0; });
   const low = stockReport(db, books).rows.filter((r) => r.low);
   return {
     month, revenue: is.totalRevenue, expenses: R(is.totalCogs + is.totalExpenses), profit: is.net,
@@ -1595,6 +1634,20 @@ export function validateDoc(db, d) {
     if (d.party && (!party || party.kind !== T.party)) e.party = T.party === 'customer' ? 'اختر عميلاً صحيحاً' : 'اختر مورداً صحيحاً';
     if (T.order && !d.party) e.party = T.party === 'customer' ? 'اختر العميل' : 'اختر المورد';
     if (!NO_POSTING.includes(d.type)) payRules(calcDoc(d, dec).total, T.party);
+    // الأقساط: لفواتير البيع والشراء فقط، ومجموعها يساوي المتبقي آجلاً عند الإصدار
+    if (Array.isArray(d.installments) && d.installments.length) {
+      const rows = d.installments;
+      if (d.type !== 'sale' && d.type !== 'purchase') e.installments = 'التقسيط لفواتير البيع والشراء فقط';
+      else if (!d.party) e.installments = d.type === 'sale' ? 'اختر العميل لتقسيط المبلغ عليه' : 'اختر المورد لتقسيط المبلغ له';
+      else {
+        const rest = round(calcDoc(d, dec).total - paymentList(d).reduce((t, p) => t + Math.max(0, num(p.amount)), 0), dec);
+        const sum = round(rows.reduce((s, r) => s + num(r.amount), 0), dec);
+        if (rows.some((r) => !isDate(r.due) || !(num(r.amount) > 0))) e.installments = 'لكل قسط تاريخ صحيح ومبلغ أكبر من صفر';
+        else if (isDate(d.date) && rows.some((r) => r.due < d.date)) e.installments = 'تاريخ القسط لا يسبق تاريخ الفاتورة';
+        else if (!(rest > 0)) e.installments = 'لا متبقٍ للتقسيط: اجعل جزءاً من المبلغ آجلاً';
+        else if (sum !== rest) e.installments = `مجموع الأقساط (${sum}) يجب أن يساوي المتبقي (${rest})`;
+      }
+    }
   } else if (d.type === 'expense') {
     const a = leaf(d.account);
     if (!a || !['expense', 'asset'].includes(a.type) || a.money || ['ar', 'ap', 'inv', 'vin', 'chq_in', 'accdep'].includes(a.id)) e.account = 'اختر بند المصروف';

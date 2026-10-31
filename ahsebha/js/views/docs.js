@@ -1,7 +1,7 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice, addMonths, installmentRows, daysBetween } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
@@ -177,6 +177,9 @@ export function form(type, { root, params, query }) {
 
   // الدفع: حساب نقدي أو آجل، والمبلغ يتبع الإجمالي حتى يعدّله المستخدم
   const hasPay = !NO_POSTING.includes(type);
+  // الأقساط: لفواتير البيع والشراء، وهي من الميزات القابلة للبيع
+  const hasInst = (type === 'sale' || type === 'purchase') && hasFeature('installments');
+  const instGen = { n: 3, first: '', step: 'month' };
   let pay = '';
   let paidAuto = true;
   // الدفع المقسّم على أكثر من صندوق أو بنك (مثل نقد + مدى من الكاشير): pay = '*'
@@ -263,6 +266,7 @@ export function form(type, { root, params, query }) {
               <input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-split="${a.id}" placeholder="0"></label>`)}</div>
               <div class="fld" style="margin-top:8px"><span class="fld-l">المتبقي ${C.kind === 'customer' ? 'على العميل' : 'للمورد'}</span><div class="kpi-v" style="font-size:1.1rem" data-split-rest></div></div></div>
             <small class="fld-e" data-err="paid" hidden></small></div>` : ''}
+          ${hasInst ? html`<div class="card" data-inst-card><div class="card-h"><h3>🗓️ الأقساط</h3></div><div data-inst></div><small class="fld-e" data-err="installments" hidden></small></div>` : ''}
           <div class="card"><div class="fld"><span class="fld-l">خصم على الفاتورة كلها</span>
             <div class="inline"><select class="inp disc-mode" data-k="discMode" aria-label="نوع خصم الفاتورة">
               <option value="" ${d.discMode ? '' : raw('selected')}>بدون خصم</option><option value="pct" ${d.discMode === 'pct' ? raw('selected') : ''}>نسبة ٪</option><option value="amt" ${d.discMode === 'amt' ? raw('selected') : ''}>مبلغ</option></select>
@@ -362,6 +366,54 @@ export function form(type, { root, params, query }) {
       <div class="row grand"><span>الإجمالي</span><span>${money(t.total, { sym: true })}</span></div>
     </div>${receiptCheck(d.scan, t)}`);
     if (hasPay) drawPay(t.total);
+    if (hasInst) drawInst(t.total);
+  }
+
+  // ── الأقساط: جدول بتواريخ ومبالغ، مجموعه يساوي المتبقي آجلاً ──
+  const instRest = (total) => round(total - (pay === '*' ? Object.values(split).reduce((t, v) => t + num(v), 0) : pay ? num(d.paid) : 0), dec());
+  const instSum = () => round((d.installments || []).reduce((t, r) => t + num(r.amount), 0), dec());
+  function genInst(rest) {
+    const n = Math.max(1, Math.min(60, Math.floor(num(instGen.n)) || 1));
+    const first = /^\d{4}-\d{2}-\d{2}$/.test(instGen.first) ? instGen.first : addMonths(d.date, 1);
+    const each = round(rest / n, dec());
+    let acc = 0;
+    return Array.from({ length: n }, (_, i) => {
+      const amount = i === n - 1 ? round(rest - acc, dec()) : each;
+      acc = round(acc + amount, dec());
+      return { due: instGen.step === 'week' ? addDays(first, 7 * i) : addMonths(first, i), amount };
+    });
+  }
+  function updInstSum() {
+    const el = $('[data-inst-sum]', root);
+    if (!el) return;
+    const rest = instRest(calc().total);
+    const sum = instSum();
+    el.className = `inst-sum ${sum === rest ? 'ok' : 'neg'}`;
+    el.innerHTML = String(html`مجموع الأقساط <b>${money(sum)}</b> من المتبقي <b>${money(rest)}</b>${sum === rest ? ' ✓' : html` — الفرق ${money(round(rest - sum, dec()))}`}`);
+  }
+  function drawInst(total) {
+    const box = $('[data-inst]', root);
+    if (!box) return;
+    const rows = Array.isArray(d.installments) ? d.installments : [];
+    const rest = instRest(total);
+    if (!rows.length) {
+      box.innerHTML = String(html`<p class="muted small">${rest > 0 ? html`المتبقي ${money(rest, { sym: true })} يمكن تقسيطه على أقساط بتواريخ.` : 'اجعل جزءاً من المبلغ آجلاً (من طريقة الدفع) ثم قسّطه.'}</p>
+        <button type="button" class="btn btn-ghost btn-sm" data-inst-new ${rest > 0 && d.party ? '' : raw('disabled')}>🗓️ تقسيط المتبقي</button>
+        ${d.party ? '' : html`<small class="fld-h">اختر ${C.kind === 'customer' ? 'العميل' : 'المورد'} أولاً.</small>`}`);
+      return;
+    }
+    box.innerHTML = String(html`<div class="inst-gen">
+        <label class="fld"><span class="fld-l">عدد الأقساط</span><input class="inp" type="text" inputmode="numeric" data-num data-ig="n" value="${instGen.n}" aria-label="عدد الأقساط"></label>
+        <label class="fld"><span class="fld-l">أول استحقاق</span><input class="inp" type="date" data-ig="first" value="${/^\d{4}-\d{2}-\d{2}$/.test(instGen.first) ? instGen.first : addMonths(d.date, 1)}" aria-label="تاريخ أول قسط"></label>
+        <label class="fld"><span class="fld-l">كل</span><select class="inp" data-ig="step" aria-label="الفاصل بين الأقساط"><option value="month" ${instGen.step === 'month' ? raw('selected') : ''}>شهر</option><option value="week" ${instGen.step === 'week' ? raw('selected') : ''}>أسبوع</option></select></label>
+        <button type="button" class="btn btn-ghost btn-sm" data-inst-gen>↻ توزيع بالتساوي</button></div>
+      <div class="inst-rows">${rows.map((r, i) => html`<div class="inst-row" data-ir="${i}"><span class="inst-n">${i + 1}</span>
+        <input class="inp" type="date" data-ik="due" value="${r.due || ''}" aria-label="تاريخ القسط ${i + 1}">
+        <input class="inp" type="text" inputmode="decimal" data-num data-ik="amount" value="${r.amount ?? ''}" aria-label="مبلغ القسط ${i + 1}">
+        <button type="button" class="icon-btn" data-inst-del="${i}" aria-label="حذف القسط ${i + 1}">✕</button></div>`)}</div>
+      <p data-inst-sum></p>
+      <div class="actions"><button type="button" class="btn btn-ghost btn-sm" data-inst-add>➕ قسط</button><button type="button" class="btn btn-text-danger btn-sm" data-inst-off>إلغاء التقسيط</button></div>`);
+    updInstSum();
   }
 
   function drawPay(total) {
@@ -435,8 +487,10 @@ export function form(type, { root, params, query }) {
   root.addEventListener('input', (e) => {
     const el = e.target;
     const k = el.dataset.k;
-    if (el.matches('[data-paid]')) { d.paid = el.value; paidAuto = false; dirty(); drawPay(calc().total); return; }
-    if (el.matches('[data-split]')) { split[el.dataset.split] = el.value; dirty(); drawPay(calc().total); return; }
+    if (el.matches('[data-paid]')) { d.paid = el.value; paidAuto = false; dirty(); drawPay(calc().total); if (hasInst) drawInst(calc().total); return; }
+    if (el.matches('[data-split]')) { split[el.dataset.split] = el.value; dirty(); drawPay(calc().total); if (hasInst) drawInst(calc().total); return; }
+    if (el.dataset.ig) { instGen[el.dataset.ig] = el.value; return; }
+    if (el.dataset.ik) { d.installments[Number(el.closest('[data-ir]').dataset.ir)][el.dataset.ik] = el.value; dirty(); updInstSum(); return; }
     if (!k) return;
     const row = el.closest('.line[data-i]');
     if (row) {
@@ -520,8 +574,19 @@ export function form(type, { root, params, query }) {
       dirty(); drawLines();
     } else if (t.closest('[data-pay-v]')) {
       pay = t.closest('[data-pay-v]').dataset.payV;
-      paidAuto = true; dirty(); drawPay(calc().total);
+      paidAuto = true; dirty(); drawPay(calc().total); if (hasInst) drawInst(calc().total);
       if (pay === '*') $('[data-split]', root)?.focus();
+    } else if (t.closest('[data-inst-new]')) {
+      d.installments = genInst(instRest(calc().total)); dirty(); drawInst(calc().total);
+    } else if (t.closest('[data-inst-gen]')) {
+      d.installments = genInst(instRest(calc().total)); dirty(); drawInst(calc().total);
+    } else if (t.closest('[data-inst-add]')) {
+      const last = d.installments[d.installments.length - 1];
+      d.installments.push({ due: last && last.due ? addMonths(last.due, 1) : addMonths(d.date, 1), amount: '' }); dirty(); drawInst(calc().total);
+    } else if (t.closest('[data-inst-del]')) {
+      d.installments.splice(Number(t.closest('[data-inst-del]').dataset.instDel), 1); dirty(); drawInst(calc().total);
+    } else if (t.closest('[data-inst-off]')) {
+      d.installments = []; dirty(); drawInst(calc().total);
     } else if (t.closest('[data-copy-ref]')) copyRef();
     else if (t.closest('[data-scan]')) scanForPurchase(d);
     else if (t.closest('[data-save]')) { e.preventDefault(); save(t.closest('[data-save]').dataset.save); }
@@ -556,6 +621,10 @@ export function form(type, { root, params, query }) {
     if (!doc.files || !doc.files.length) delete doc.files;
     // خصم الفاتورة: يُحفظ رقماً إن كُتبت له قيمة، وإلا يُحذف (القيمة الخاطئة تبقى ليُنبَّه عليها)
     if ((d.discMode === 'pct' || d.discMode === 'amt') && String(d.discVal ?? '').trim() !== '' && num(d.discVal) !== 0) { doc.discMode = d.discMode; doc.discVal = num(d.discVal); } else { delete doc.discMode; delete doc.discVal; }
+    // الأقساط: تُحفظ أرقاماً وتواريخ إن وُجدت (والميزة مفتوحة)، وإلا تُحذف
+    const insts = hasInst && Array.isArray(d.installments) ? d.installments.filter((r) => String(r.due || '').trim() || String(r.amount ?? '').trim() !== '') : [];
+    // (فاتورة قديمة بأقساط تُعدَّل بعد انتهاء الميزة: تبقى أقساطها كما هي)
+    if (insts.length) doc.installments = insts.map((r) => ({ due: String(r.due || ''), amount: num(r.amount) })); else if (hasInst || !existing || !existing.installments) delete doc.installments;
     if (hasPay) {
       const total = calcDoc(doc, dec()).total;
       if (pay === '*') {
@@ -631,6 +700,8 @@ export function show(type, { root, params, query }) {
 
   const payHref = type === 'sale' ? `#/receipts/new?party=${d.party}&link=${d.id}&amount=${st ? st.due : ''}`
     : type === 'purchase' ? `#/payments/new?party=${d.party}&link=${d.id}&amount=${st ? st.due : ''}` : '';
+  // جدول الأقساط وحالة كل قسط (لا يُعرض لفاتورة ملغاة)
+  const instRows = d.installments && st && !cancelledBy ? installmentRows(d, st.due, dec()) : null;
   const retHref = type === 'sale' ? `#/sales-returns/new?ref=${d.id}` : type === 'purchase' ? `#/purchase-returns/new?ref=${d.id}` : '';
 
   root.innerHTML = String(html`
@@ -678,6 +749,12 @@ export function show(type, { root, params, query }) {
         return self || !x ? html`<div class="it">${inner}</div>` : html`<a href="${docHref(x)}">${inner}</a>`;
       })}
     </div></div>` : ''}
+    ${instRows ? html`<div class="card" style="margin-top:14px"><div class="card-h"><h3>🗓️ جدول الأقساط</h3><span class="muted small">${instRows.filter((r) => r.left <= 0).length} من ${instRows.length} مسددة</span></div>
+      <div class="tbl-wrap"><table class="tbl" data-inst-table><thead><tr><th>#</th><th>الاستحقاق</th><th class="num">المبلغ</th><th class="num">المسدد</th><th class="num">المتبقي</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${instRows.map((r) => { const late = r.left > 0 && r.due < today(); return html`<tr><td>${r.n}</td><td>${fmtDate(r.due)}</td><td class="num">${money(r.amount)}</td><td class="num">${money(r.paid)}</td><td class="num">${money(r.left)}</td>
+        <td>${r.left <= 0 ? html`<span class="badge badge-ok">مسدد</span>` : late ? html`<span class="badge badge-bad">متأخر ${daysBetween(r.due, today())} يوم</span>` : r.paid > 0 ? html`<span class="badge badge-warn">جزئي</span>` : html`<span class="badge badge-muted">قادم</span>`}</td>
+        <td>${r.left > 0 && payHref ? html`<a class="btn btn-ghost btn-sm" href="${payHref.replace(/amount=[^&]*$/, 'amount=' + r.left)}">${type === 'sale' ? 'قبض' : 'سداد'}</a>` : ''}</td></tr>`; })}
+      </tbody></table></div></div>` : ''}
     ${NO_POSTING.includes(type) ? '' : html`<details class="card" style="margin-top:14px"><summary style="cursor:pointer;font-weight:800">📒 القيد المحاسبي</summary><div style="margin-top:12px">${entryTable(B.entries.get(d.id))}</div></details>`}`);
 
   const doPrint = () => printPaper(docPaper(d, { size }), { size, title: `${no} - ${s.name || ''}` });
