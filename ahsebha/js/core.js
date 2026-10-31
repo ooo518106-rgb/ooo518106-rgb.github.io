@@ -1346,6 +1346,70 @@ export function cashReport(db, books, { from, to } = {}) {
   return { rows, totals: { open: sum('open'), in: sum('in'), out: sum('out'), close: sum('close') } };
 }
 
+// قائمة التدفقات النقدية المباشرة: تصنّف المقبوضات والمدفوعات حسب الحساب المقابل.
+export function cashFlowStatement(db, books, { from, to } = {}) {
+  const R = (x) => round(x, books.dec);
+  const moneyIds = new Set(moneyAccounts(db).map((a) => a.id));
+  const accounts = accountMap(db);
+  const categoryOf = (id) => {
+    const a = accounts.get(id);
+    if (!a) return 'other';
+    if (a.id === 'assetgl') return 'investing';
+    if (a.type === 'equity') return 'financing';
+    if (a.type === 'liability') {
+      let cur = a;
+      const seen = new Set();
+      while (cur && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        if (cur.id === 'loans' || /قروض|تمويل/i.test(cur.name || '')) return 'financing';
+        cur = accounts.get(cur.parent);
+      }
+      return 'operating';
+    }
+    if (a.type === 'asset') {
+      let cur = a;
+      const seen = new Set();
+      while (cur && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        if (cur.id === 'g12' || /أصول ثابتة/i.test(cur.name || '')) return 'investing';
+        cur = accounts.get(cur.parent);
+      }
+      return 'operating';
+    }
+    if (a.type === 'revenue' || a.type === 'expense') return 'operating';
+    return 'other';
+  };
+  const flows = {
+    operating: { in: 0, out: 0 },
+    investing: { in: 0, out: 0 },
+    financing: { in: 0, out: 0 },
+    other: { in: 0, out: 0 },
+  };
+  const allocate = (amount, counterpartLines, side, direction) => {
+    if (!(amount > 0)) return;
+    const eligible = counterpartLines.filter((l) => !moneyIds.has(l.acc) && l[side] > 0);
+    const weight = eligible.reduce((s, l) => s + l[side], 0);
+    if (!(weight > 0)) return; // تحويلات الصندوق والبنك لا تعد تدفقاً للمنشأة
+    for (const l of eligible) flows[categoryOf(l.acc)][direction] += amount * l[side] / weight;
+  };
+  for (const entry of books.entries.values()) {
+    if ((from && entry.date < from) || (to && entry.date > to)) continue;
+    const cash = entry.lines.filter((l) => moneyIds.has(l.acc));
+    const others = entry.lines.filter((l) => !moneyIds.has(l.acc));
+    const received = cash.reduce((s, l) => s + l.dr, 0);
+    const paid = cash.reduce((s, l) => s + l.cr, 0);
+    allocate(received, others, 'cr', 'in');
+    allocate(paid, others, 'dr', 'out');
+  }
+  for (const f of Object.values(flows)) { f.in = R(f.in); f.out = R(f.out); f.net = R(f.in - f.out); }
+  const m = balances(books, { from, to });
+  const money = moneyAccounts(db);
+  const opening = R(money.reduce((s, a) => s + (m.get(a.id)?.open || 0), 0));
+  const closing = R(money.reduce((s, a) => s + (m.get(a.id)?.close || 0), 0));
+  const net = R(Object.values(flows).reduce((s, f) => s + f.net, 0));
+  return { flows, opening, closing, net, reconciliation: R(closing - opening - net) };
+}
+
 // ═══ تقدير الزكاة للاسترشاد ═══
 // صافي الأصول المتداولة الزكوية ناقص الالتزامات المستحقة (الأنسب للمحلات التجارية)
 export const ZAKAT_RATE = { hijri: 2.5, gregorian: 2.5776 };
