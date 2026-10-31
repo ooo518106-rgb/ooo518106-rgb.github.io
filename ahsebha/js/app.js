@@ -1,5 +1,6 @@
 // ═══ برنامج محاسبة كنز: الهيكل والتنقل ═══
 import * as store from './store.js';
+import './data-services.js';
 import { BRAND, logoImg } from './brand.js';
 import { icon, iconFor, watchIcons } from './icons.js';
 import { watchA11y } from './a11y.js';
@@ -14,6 +15,7 @@ import * as products from './views/products.js';
 import * as parties from './views/parties.js';
 import * as reports from './views/reports.js';
 import * as settings from './views/settings.js';
+import * as dataServices from './views/data-services.js';
 import * as pos from './views/pos.js';
 import * as importer from './views/importer.js';
 import * as collections from './views/collections.js';
@@ -66,6 +68,7 @@ on('daybook', ledger.daybook);
 on('reports', reports.index);
 on('reports/:name', reports.report);
 on('settings', settings.view);
+on('data-services', dataServices.view);
 on('pos', pos.pos);
 on('pos/closing', pos.closing);
 on('labels', products.labels);
@@ -419,3 +422,4 @@ async function boot() {
 }
 
 boot();
+

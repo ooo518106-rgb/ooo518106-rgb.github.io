@@ -26,7 +26,7 @@ const SEG_PERM = {
   employees: 'buy', payroll: 'buy', 'stock-transfers': 'buy', reconcile: 'buy',
   products: 'products', labels: 'products', import: 'products', lots: 'products', serials: 'sell',
   accounts: 'reports', reports: 'reports', collections: 'reports', today: 'reports', '': 'reports',
-  settings: 'settings', users: 'admin', subscription: 'admin', activate: 'admin', welcome: null,
+  settings: 'settings', 'data-services': 'admin', users: 'admin', subscription: 'admin', activate: 'admin', welcome: null,
 };
 export function routePerm(path) {
   const parts = String(path || '').replace(/^#?\/?/, '').split('?')[0].split('/').filter(Boolean);
@@ -271,3 +271,4 @@ function showLock() {
   };
   draw();
 }
+

@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'ahsebha/**'
+      - 'cloud/**'
       - '.github/workflows/ahsebha-tests.yml'
   push:
     branches: [main]
     paths:
       - 'ahsebha/**'
+      - 'cloud/**'
       - '.github/workflows/ahsebha-tests.yml'
   workflow_dispatch:
 
@@ -38,3 +40,4 @@ jobs:
 
       - name: تشغيل الاختبارات
         run: npm test
+

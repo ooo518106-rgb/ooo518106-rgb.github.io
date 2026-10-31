@@ -29,12 +29,22 @@ export function isEncryptedBackup(text) {
 
 // bytes: Uint8Array (نص JSON مرمّز أو ZIP)؛ يرجّع نص ملف النسخة المشفّرة
 export async function encryptBytes(bytes, password, { kind = 'json', iter = ITERATIONS } = {}) {
+  return encryptWithWriter(bytes, await createBackupWriter(password, { iter }), { kind });
+}
+
+// يمكن حفظ هذا المفتاح للنسخ الآلي: لا يحتفظ بكلمة السر ولا يسمح بفك التشفير.
+export async function createBackupWriter(password, { iter = ITERATIONS } = {}) {
   if (String(password || '').length < MIN_PASSWORD) throw new Error(`كلمة السر لازم تكون ${MIN_PASSWORD} خانة على الأقل`);
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await keyFor(password, salt, iter, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes));
-  return JSON.stringify({ app: APP, v: 1, kdf: 'PBKDF2-SHA256', iter, kind, salt: b64(salt), iv: b64(iv), data: b64(ct) });
+  return { key, salt, iter };
+}
+
+export async function encryptWithWriter(bytes, writer, { kind = 'json' } = {}) {
+  if (!writer?.key || writer.key.extractable || writer.key.usages.length !== 1 || writer.key.usages[0] !== 'encrypt') throw new Error('مفتاح النسخ الآلي غير صالح');
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, writer.key, bytes));
+  return JSON.stringify({ app: APP, v: 1, kdf: 'PBKDF2-SHA256', iter: writer.iter, kind, salt: b64(writer.salt), iv: b64(iv), data: b64(ct) });
 }
 
 // يفك النسخة المشفّرة: { bytes, kind }؛ كلمة سر خاطئة أو تلاعب بالملف يعطي خطأً واضحاً
@@ -48,3 +58,4 @@ export async function decryptBackup(text, password) {
     return { bytes: new Uint8Array(pt), kind: o.kind === 'zip' ? 'zip' : 'json' };
   } catch (e) { throw new Error(WRONG); }
 }
+

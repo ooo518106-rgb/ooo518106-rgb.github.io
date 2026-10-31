@@ -237,6 +237,7 @@ async function doWrite() {
     if (channel) channel.postMessage({ type: 'saved', from: tabId });
     if (r.merged) listeners.forEach((fn) => fn());
     if (db) dailySnapshot();
+    if (db && typeof window !== 'undefined') window.dispatchEvent(new Event('acc:saved'));
   } catch (e) {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(db));
@@ -961,3 +962,4 @@ export function parseBackup(text) {
   if ((Number(d.schema) || 1) > SCHEMA) throw new Error('النسخة من إصدار أحدث. حدّث الصفحة ثم حاول مجدداً');
   return normalize(d);
 }
+
