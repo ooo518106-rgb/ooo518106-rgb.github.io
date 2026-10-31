@@ -53,8 +53,8 @@ test('كل تشفير له ملح ومتجه جديدان، وكلمة السر 
 });
 
 test('توحيد ترميز الحروف: كلمة السر نفسها بترميزين مختلفين تفتح النسخة', async () => {
-  const composed = 'café-سر';
-  const decomposed = 'café-سر';
+  const composed = 'café-سر-2026';
+  const decomposed = 'café-سر-2026';
   assert.notEqual(composed, decomposed);
   const text = await encryptBytes(enc('ok'), composed, { iter: FAST });
   assert.equal(dec((await decryptBackup(text, decomposed)).bytes), 'ok');
