@@ -12,30 +12,30 @@ const enc = (s) => new TextEncoder().encode(s);
 const dec = (b) => new TextDecoder().decode(b);
 
 test('دورة كاملة: تشفير ثم فك يرجّع البايتات نفسها، ويبقى نوع المحتوى', async () => {
-  const text = await encryptBytes(enc('{"app":"x","docs":[1,2,3]}'), 'سر-قوي-123', { iter: FAST });
+  const text = await encryptBytes(enc('{"app":"x","docs":[1,2,3]}'), 'Kenz-safe-2026', { iter: FAST });
   assert.equal(isEncryptedBackup(text), true);
   const o = JSON.parse(text);
   assert.deepEqual([o.app, o.v, o.kdf, o.iter, o.kind], ['kenz-encrypted-backup', 1, 'PBKDF2-SHA256', FAST, 'json']);
   assert.ok(o.salt && o.iv && o.data);
   assert.ok(!text.includes('docs'), 'لا شيء من المحتوى ظاهر');
-  const back = await decryptBackup(text, 'سر-قوي-123');
+  const back = await decryptBackup(text, 'Kenz-safe-2026');
   assert.equal(dec(back.bytes), '{"app":"x","docs":[1,2,3]}');
   assert.equal(back.kind, 'json');
-  const zip = await encryptBytes(new Uint8Array([0x50, 0x4b, 3, 4, 9, 9]), 'abcdef', { kind: 'zip', iter: FAST });
-  const z = await decryptBackup(zip, 'abcdef');
+  const zip = await encryptBytes(new Uint8Array([0x50, 0x4b, 3, 4, 9, 9]), 'abcdef-Strong12', { kind: 'zip', iter: FAST });
+  const z = await decryptBackup(zip, 'abcdef-Strong12');
   assert.equal(z.kind, 'zip');
   assert.deepEqual([...z.bytes], [0x50, 0x4b, 3, 4, 9, 9]);
 });
 
 test('كلمة سر خاطئة أو ملف متلاعَب به: خطأ واضح وبدون كشف شيء', async () => {
-  const text = await encryptBytes(enc('بيانات المحل'), 'الكلمة-الصحيحة', { iter: FAST });
+  const text = await encryptBytes(enc('بيانات المحل'), 'الكلمة-الصحيحة-2026', { iter: FAST });
   await assert.rejects(() => decryptBackup(text, 'كلمة-خطأ'), { message: WRONG });
   await assert.rejects(() => decryptBackup(text, ''), { message: WRONG });
   const o = JSON.parse(text);
   const flip = (k) => JSON.stringify({ ...o, [k]: o[k].slice(0, -4) + (o[k].slice(-4) === 'AAAA' ? 'BBBB' : 'AAAA') });
-  for (const k of ['data', 'iv', 'salt']) await assert.rejects(() => decryptBackup(flip(k), 'الكلمة-الصحيحة'), { message: WRONG }, k);
+  for (const k of ['data', 'iv', 'salt']) await assert.rejects(() => decryptBackup(flip(k), 'الكلمة-الصحيحة-2026'), { message: WRONG }, k);
   // تغيير عدد الدورات يغيّر المفتاح فيفشل
-  await assert.rejects(() => decryptBackup(JSON.stringify({ ...o, iter: FAST + 1 }), 'الكلمة-الصحيحة'), { message: WRONG });
+  await assert.rejects(() => decryptBackup(JSON.stringify({ ...o, iter: FAST + 1 }), 'الكلمة-الصحيحة-2026'), { message: WRONG });
   // نص ليس JSON، أو JSON لا يخص البرنامج
   await assert.rejects(() => decryptBackup('not json', 'x'), { message: WRONG });
   await assert.rejects(() => decryptBackup('{"app":"other"}', 'x'), { message: WRONG });
@@ -44,16 +44,17 @@ test('كلمة سر خاطئة أو ملف متلاعَب به: خطأ واضح 
 });
 
 test('كل تشفير له ملح ومتجه جديدان، وكلمة السر لها حد أدنى', async () => {
-  const a = JSON.parse(await encryptBytes(enc('نفس النص'), 'abcdef', { iter: FAST }));
-  const b = JSON.parse(await encryptBytes(enc('نفس النص'), 'abcdef', { iter: FAST }));
+  const a = JSON.parse(await encryptBytes(enc('نفس النص'), 'abcdef-Strong12', { iter: FAST }));
+  const b = JSON.parse(await encryptBytes(enc('نفس النص'), 'abcdef-Strong12', { iter: FAST }));
   assert.notEqual(a.salt, b.salt); assert.notEqual(a.iv, b.iv); assert.notEqual(a.data, b.data);
-  await assert.rejects(() => encryptBytes(enc('x'), 'abc'), { message: new RegExp(String(MIN_PASSWORD)) });
+  assert.equal(MIN_PASSWORD, 12);
+  await assert.rejects(() => encryptBytes(enc('x'), 'weak-123'), { message: new RegExp(String(MIN_PASSWORD)) });
   await assert.rejects(() => encryptBytes(enc('x'), ''));
 });
 
 test('توحيد ترميز الحروف: كلمة السر نفسها بترميزين مختلفين تفتح النسخة', async () => {
-  const composed = 'café-سر';
-  const decomposed = 'café-سر';
+  const composed = 'café-سر-2026';
+  const decomposed = 'café-سر-2026';
   assert.notEqual(composed, decomposed);
   const text = await encryptBytes(enc('ok'), composed, { iter: FAST });
   assert.equal(dec((await decryptBackup(text, decomposed)).bytes), 'ok');
@@ -83,9 +84,9 @@ test('نسخة البرنامج الحقيقية: تشفير ثم فك ثم اس
   store.replaceDb(base);
   store.saveDoc({ type: 'sale', date: '2026-02-01', party: null, vatRate: 0, lines: [{ product: null, desc: 'بند', qty: 2, price: 10, disc: 0, tax: 'S' }], paid: 20, payAcc: 'cash', notes: 'سرّية' });
   const json = store.backupJSON();
-  const text = await encryptBytes(enc(json), 'كلمة-سر-النسخة', { iter: FAST });
+  const text = await encryptBytes(enc(json), 'كلمة-سر-النسخة-2026', { iter: FAST });
   assert.ok(!text.includes('سرّية') && !text.includes('محل التشفير'), 'لا تسرّب نصاً من البيانات');
-  const restored = store.parseBackup(dec((await decryptBackup(text, 'كلمة-سر-النسخة')).bytes));
+  const restored = store.parseBackup(dec((await decryptBackup(text, 'كلمة-سر-النسخة-2026')).bytes));
   assert.equal(restored.settings.name, 'محل التشفير');
   assert.equal(restored.docs.length, 1);
   assert.equal(restored.docs[0].notes, 'سرّية');
