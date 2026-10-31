@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
 import {
-  docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, round, ymd, monthStart, monthEnd, addMonths, addDays,
+  docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, round, installmentRows, ymd, monthStart, monthEnd, addMonths, addDays,
   quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
@@ -78,7 +78,8 @@ export function docStatus(d, B = store.getBooks()) {
   if (!st) return null;
   // الفاتورة الملغاة بإشعار دائن: لا مدفوع ولا متبقي، وحالتها «ملغاة»
   if (B.cancelled && B.cancelled.has(d.id)) return { ...st, state: 'cancelled', paid: 0, due: 0 };
-  const late = st.state !== 'paid' && d.dueDate && d.dueDate < today();
+  const dueOn = st.nextDue || d.dueDate;
+  const late = st.state !== 'paid' && dueOn && dueOn < today();
   return { ...st, state: late ? 'overdue' : st.state };
 }
 
@@ -311,6 +312,8 @@ export function docPaper(d, { size = 'a4' } = {}) {
     <table class="pp-lines"><thead>${headRow}</thead><tbody>${lineRows}</tbody></table>
     <div class="pp-bottom">
       <div>${qr ? html`<div class="pp-qr">${raw(qr)}<div class="muted small">رمز الاستجابة السريعة للفاتورة وفق متطلبات هيئة الزكاة والضريبة والجمارك</div></div>` : ''}
+        ${!small && d.installments && d.installments.length ? html`<div class="pp-inst"><h4>${L('جدول الأقساط', 'Installments')}</h4><table><tbody>
+          ${installmentRows(d, st ? st.due : 1e12, dec()).map((r) => html`<tr><td>${r.n}</td><td>${fmtDate(r.due)}</td><td class="num">${money(r.amount)}</td><td>${r.left <= 0 ? L('مسدد', 'Paid') : ''}</td></tr>`)}</tbody></table></div>` : ''}
         ${note ? html`<div class="pp-note">${note}</div>` : ''}</div>
       <div><div class="pp-totals">
         ${anyDisc || T.docDiscount ? html`<div><span>${L('المجموع قبل الخصم', 'Subtotal')}</span>${money(T.gross)}</div>` : ''}

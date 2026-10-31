@@ -103,11 +103,12 @@ export function summaryFacts(db, B, { preset = 'today', today = ymd() } = {}) {
   // ما يحتاج انتباهاً الآن (بغض النظر عن الفترة)
   const D = dashboard(db, B, today);
   const owed = new Map();
-  for (const d of D.overdue) owed.set(d.party, (owed.get(d.party) || 0) + (B.status.get(d.id)?.due || 0));
+  const lateOf = (d) => { const st = B.status.get(d.id) || {}; return st.lateAmt != null ? st.lateAmt : st.due || 0; };
+  for (const d of D.overdue) owed.set(d.party, (owed.get(d.party) || 0) + lateOf(d));
   const nameOf = (id) => (db.parties || []).find((p) => p.id === id)?.name || 'عميل';
   const overdue = {
     count: D.overdue.length,
-    total: R(D.overdue.reduce((s, d) => s + (B.status.get(d.id)?.due || 0), 0)),
+    total: R(D.overdue.reduce((s, d) => s + lateOf(d), 0)),
     top: [...owed].map(([id, amount]) => ({ name: nameOf(id), amount: R(amount) })).sort((a, b) => b.amount - a.amount).slice(0, 2),
   };
   const low = stockReport(db, B).rows.filter((r) => r.low).map((r) => ({ name: r.product.name, qty: Number(r.qty.toFixed(3)), unit: r.product.unit || '' }));
