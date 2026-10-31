@@ -18,7 +18,7 @@ test('دورة كاملة: تشفير ثم فك يرجّع البايتات نف
   assert.deepEqual([o.app, o.v, o.kdf, o.iter, o.kind], ['kenz-encrypted-backup', 1, 'PBKDF2-SHA256', FAST, 'json']);
   assert.ok(o.salt && o.iv && o.data);
   assert.ok(!text.includes('docs'), 'لا شيء من المحتوى ظاهر');
-  const back = await decryptBackup(text, 'سر-قوي-123');
+  const back = await decryptBackup(text, 'Kenz-safe-2026');
   assert.equal(dec(back.bytes), '{"app":"x","docs":[1,2,3]}');
   assert.equal(back.kind, 'json');
   const zip = await encryptBytes(new Uint8Array([0x50, 0x4b, 3, 4, 9, 9]), 'abcdef-Strong12', { kind: 'zip', iter: FAST });
