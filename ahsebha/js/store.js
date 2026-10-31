@@ -7,7 +7,28 @@ import { pack, unpack } from './pack.js';
 const APP_ID = 'ahsebha-accounting';
 const IDB_NAME = 'ahsebha-accounting';
 const IDB_STORE = 'kv';
-const LS_KEY = 'ahsebha-accounting';
+
+// ─── الشركات: لكل شركة مفاتيحها في نفس قاعدة الجهاز ───
+// الشركة الأولى (main) بمفاتيحها القديمة كما هي فلا يلزم أي ترحيل، والبقية بلاحقة @المعرّف. الشركة الفعّالة تُقرأ مرة واحدة عند فتح
+// الصفحة (لكل نافذة شركتها)، والتبديل بين الشركات يعيد تحميل الصفحة فلا تختلط بيانات شركتين في الذاكرة.
+const COMPANY_KEY = 'ahsebha-company';
+const COMPANY_RE = /^[a-z0-9]{3,24}$/;
+function readCompany() {
+  try {
+    const pick = globalThis.__KENZ_COMPANY__
+      || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(COMPANY_KEY))
+      || (typeof localStorage !== 'undefined' && localStorage.getItem(COMPANY_KEY))
+      || 'main';
+    const id = COMPANY_RE.test(pick) ? pick : 'main';
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(COMPANY_KEY, id);
+    return id;
+  } catch (e) { return 'main'; }
+}
+export const companyId = readCompany();
+const SFX = companyId === 'main' ? '' : '@' + companyId;
+const KEY = { db: 'db' + SFX, ver: 'ver' + SFX, conflict: 'db-conflict' + SFX, snaps: 'snaps' + SFX };
+const snapKey = (id) => 'snap:' + id + SFX; // معرّف النسخة اليومية يتكرر بين الشركات (d:التاريخ) فتُميَّز بلاحقة الشركة
+const LS_KEY = 'ahsebha-accounting' + SFX;
 const LS_VER = LS_KEY + ':ver';
 
 let db = null;
@@ -29,7 +50,7 @@ let queue = Promise.resolve();
 let lsLeft = false;
 const listeners = new Set();
 const tabId = newId();
-const channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(APP_ID) : null;
+const channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(APP_ID + SFX) : null;
 
 export function newId() {
   const a = new Uint8Array(6);
@@ -106,7 +127,7 @@ export async function load() {
   let data = null;
   let idbVer = 0;
   try {
-    const [d, v] = await idbGetMany(['db', 'ver']);
+    const [d, v] = await idbGetMany([KEY.db, KEY.ver]);
     data = d; idbVer = Number(v) || 0; backend = 'idb';
   } catch (e) { backend = 'ls'; }
   // نسخة localStorage تُفضَّل إن كانت أحدث (تُكتب فقط حين تفشل كتابة IndexedDB)
@@ -126,13 +147,14 @@ export async function load() {
   pending = [];
   force = false;
   rev++;
+  if (db) noteCompany().catch(() => {});
   return db;
 }
 
 // الإصدار المخزّن الآن (للتحقق من وصول تغيير من نافذة أخرى)
 async function storedVersion() {
   if (backend === 'idb') {
-    try { const [v] = await idbGetMany(['ver']); return Number(v) || 0; } catch (e) { return baseVer; }
+    try { const [v] = await idbGetMany([KEY.ver]); return Number(v) || 0; } catch (e) { return baseVer; }
   }
   try { return Number(localStorage.getItem(LS_VER)) || 0; } catch (e) { return baseVer; }
 }
@@ -181,13 +203,13 @@ function casIdb() {
     tx.oncomplete = () => { inflight = null; baseVer = result.ver; resolve(result); };
     tx.onerror = () => fail(tx.error);
     tx.onabort = () => fail(tx.error);
-    const put = (obj, ver, conflict) => { s.put(obj, 'db'); s.put(ver, 'ver'); if (conflict) s.put(conflict, 'db-conflict'); };
+    const put = (obj, ver, conflict) => { s.put(obj, KEY.db); s.put(ver, KEY.ver); if (conflict) s.put(conflict, KEY.conflict); };
     const attempt = (stored, latest) => { try { result = commit(stored, latest, put); } catch (e) { try { tx.abort(); } catch (_) { /* انتهت */ } fail(e); } };
-    const rv = s.get('ver');
+    const rv = s.get(KEY.ver);
     rv.onsuccess = () => {
       const stored = Number(rv.result) || 0;
       if (force || stored === baseVer) return attempt(stored, null);
-      const rd = s.get('db');
+      const rd = s.get(KEY.db);
       rd.onsuccess = () => attempt(stored, rd.result || null);
     };
   }));
@@ -336,6 +358,7 @@ function replaceWith(next) {
   rev++;
   schedule();
   requestPersist();
+  noteCompany().catch(() => {});
   return db;
 }
 export function createCompany(settings, extra = {}) {
@@ -345,6 +368,7 @@ export function replaceDb(data) {
   replaceWith(normalize(data));
 }
 export async function wipe() {
+  const mine = usedFileIds(); // مرفقات هذه الشركة وحدها: ملفات الشركات الأخرى لا تُمسّ
   clearTimeout(timer);
   timer = null;
   pending = [];
@@ -358,20 +382,20 @@ export async function wipe() {
     await new Promise((resolve, reject) => {
       const tx = d.transaction(IDB_STORE, 'readwrite');
       const st = tx.objectStore(IDB_STORE);
-      const rv = st.get('ver');
-      const rs = st.get('snaps');
-      rv.onsuccess = () => { const v = (Number(rv.result) || 0) + 1; baseVer = v; st.put(v, 'ver'); };
-      rs.onsuccess = () => { for (const m of rs.result || []) st.delete('snap:' + m.id); st.delete('snaps'); st.delete('db'); st.delete('db-conflict'); };
+      const rv = st.get(KEY.ver);
+      const rs = st.get(KEY.snaps);
+      rv.onsuccess = () => { const v = (Number(rv.result) || 0) + 1; baseVer = v; st.put(v, KEY.ver); };
+      rs.onsuccess = () => { for (const m of rs.result || []) st.delete(snapKey(m.id)); st.delete(KEY.snaps); st.delete(KEY.db); st.delete(KEY.conflict); };
       tx.oncomplete = resolve;
       tx.onerror = tx.onabort = () => reject(tx.error);
     });
   } catch (e) { /* قد لا يكون موجوداً */ }
-  try { await deleteFiles(await fileIds()); } catch (e) { /* لا مرفقات */ }
+  try { await deleteFiles([...mine]); } catch (e) { /* لا مرفقات */ }
   try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_VER); } catch (e) { /* قد لا يكون موجوداً */ }
   lastSnapDay = '';
   if (channel) channel.postMessage({ type: 'saved', from: tabId });
 }
-export function saveSettings(patch) { mutate((d) => Object.assign(d.settings, patch)); }
+export function saveSettings(patch) { mutate((d) => Object.assign(d.settings, patch)); if ('name' in patch) noteCompany().catch(() => {}); }
 // قفل الفترات يُسجَّل في سجل التعديلات (من قفل ومن فتح)
 export function setLockDate(date) {
   mutate((d) => {
@@ -716,7 +740,7 @@ const SNAP_DAYS = 7;
 let snapBusy = false;
 let lastSnapDay = '';
 async function snapIndex() {
-  try { const [i] = await idbGetMany(['snaps']); return Array.isArray(i) ? i : []; } catch (e) { return []; }
+  try { const [i] = await idbGetMany([KEY.snaps]); return Array.isArray(i) ? i : []; } catch (e) { return []; }
 }
 export async function listSnapshots() {
   return (await snapIndex()).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
@@ -728,14 +752,14 @@ async function putSnapshot(id, data) {
   await new Promise((resolve, reject) => {
     const tx = d.transaction(IDB_STORE, 'readwrite');
     const st = tx.objectStore(IDB_STORE);
-    const ri = st.get('snaps');
+    const ri = st.get(KEY.snaps);
     ri.onsuccess = () => {
       let index = (Array.isArray(ri.result) ? ri.result : []).filter((m) => m.id !== id);
       index.push(meta);
       const daily = index.filter((m) => m.id.startsWith('d:')).sort((a, b) => b.id.localeCompare(a.id));
-      for (const m of daily.slice(SNAP_DAYS)) { st.delete('snap:' + m.id); index = index.filter((x) => x.id !== m.id); }
-      st.put(rec, 'snap:' + id);
-      st.put(index, 'snaps');
+      for (const m of daily.slice(SNAP_DAYS)) { st.delete(snapKey(m.id)); index = index.filter((x) => x.id !== m.id); }
+      st.put(rec, snapKey(id));
+      st.put(index, KEY.snaps);
     };
     tx.oncomplete = resolve;
     tx.onerror = tx.onabort = () => reject(tx.error);
@@ -763,7 +787,7 @@ export async function snapshotNow(id = 'd:' + ymd(new Date())) {
 }
 export const snapshotsSupported = () => backend === 'idb' && typeof indexedDB !== 'undefined';
 export async function readSnapshot(id) {
-  const [rec] = await idbGetMany(['snap:' + id]);
+  const [rec] = await idbGetMany([snapKey(id)]);
   return rec ? unpack(rec) : null;
 }
 // يستعيد نسخة تلقائية مكان البيانات الحالية (والحالة الحالية تُحفظ تحت «قبل آخر استبدال» فيمكن التراجع)
@@ -779,11 +803,99 @@ export async function deleteSnapshot(id) {
   await new Promise((resolve, reject) => {
     const tx = d.transaction(IDB_STORE, 'readwrite');
     const st = tx.objectStore(IDB_STORE);
-    const ri = st.get('snaps');
-    ri.onsuccess = () => { st.delete('snap:' + id); st.put((Array.isArray(ri.result) ? ri.result : []).filter((m) => m.id !== id), 'snaps'); };
+    const ri = st.get(KEY.snaps);
+    ri.onsuccess = () => { st.delete(snapKey(id)); st.put((Array.isArray(ri.result) ? ri.result : []).filter((m) => m.id !== id), KEY.snaps); };
     tx.oncomplete = resolve;
     tx.onerror = tx.onabort = () => reject(tx.error);
   });
+}
+
+// ─── قائمة الشركات على هذا الجهاز ───
+// السجل (مفتاح companies) يحفظ معرّف كل شركة واسمها لعرضها في المبدّل دون فتح بياناتها. تسجّل الشركة الفعّالة نفسها عند فتحها وعند تغيير اسمها.
+const REG_KEY = 'companies';
+const LS_REG = 'ahsebha-companies';
+const dbKeyOf = (id) => (id === 'main' ? 'db' : 'db@' + id);
+const cleanReg = (r) => (Array.isArray(r) ? r.filter((c) => isObj(c) && typeof c.id === 'string' && COMPANY_RE.test(c.id)) : []);
+async function readRegistry() {
+  if (backend === 'idb') {
+    try { const [r] = await idbGetMany([REG_KEY]); return cleanReg(r); } catch (e) { /* نجرّب البديل */ }
+  }
+  try { return cleanReg(JSON.parse(localStorage.getItem(LS_REG) || '[]')); } catch (e) { return []; }
+}
+// تعديل السجل داخل معاملة واحدة (قراءة ثم كتابة)، فلا تضيع إضافة نافذة بسبب نافذة أخرى
+async function updateRegistry(fn) {
+  if (backend === 'idb') {
+    const d = await idb();
+    await new Promise((resolve, reject) => {
+      const tx = d.transaction(IDB_STORE, 'readwrite');
+      const st = tx.objectStore(IDB_STORE);
+      const r = st.get(REG_KEY);
+      r.onsuccess = () => st.put(fn(cleanReg(r.result).map((c) => ({ ...c }))), REG_KEY);
+      tx.oncomplete = resolve;
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+    return;
+  }
+  const reg = await readRegistry();
+  localStorage.setItem(LS_REG, JSON.stringify(fn(reg.map((c) => ({ ...c })))));
+}
+const nameOf = () => String((db && db.settings && db.settings.name) || '').trim();
+export async function noteCompany() {
+  if (!db || !canPersist()) return;
+  const name = nameOf();
+  const cur = (await readRegistry()).find((c) => c.id === companyId);
+  if (cur && cur.name === name) return;
+  await updateRegistry((r) => {
+    const i = r.findIndex((c) => c.id === companyId);
+    if (i >= 0) r[i] = { ...r[i], name }; else r.push({ id: companyId, name, createdAt: now() });
+    return r;
+  });
+}
+// الشركات المحفوظة على الجهاز، والفعّالة منها مُعلَّمة (وتُدرج حتى لو لم تُسجَّل بعد)
+export async function listCompanies() {
+  const reg = await readRegistry();
+  const out = reg.map((c) => ({ id: c.id, name: c.id === companyId && db ? nameOf() : String(c.name || ''), active: c.id === companyId }));
+  if (!out.some((c) => c.active)) out.unshift({ id: companyId, name: nameOf(), active: true });
+  return out;
+}
+// شركة جديدة فارغة (تُنشأ بياناتها حين يكمل المستخدم شاشة البدء بعد التبديل إليها)؛ ترجّع معرّفها
+export async function addCompany() {
+  await flush();
+  const id = newId();
+  await updateRegistry((r) => {
+    if (!r.some((c) => c.id === companyId)) r.unshift({ id: companyId, name: nameOf(), createdAt: now() });
+    r.push({ id, name: '', createdAt: now() });
+    return r;
+  });
+  return id;
+}
+// التبديل يعيد تحميل الصفحة على الشركة الجديدة: نحفظ ما عندنا أولاً (flush) ثم نُعيد الفتح من الرئيسية
+export function switchCompany(id) {
+  if (!COMPANY_RE.test(id)) throw new Error('شركة غير معروفة');
+  try { sessionStorage.setItem(COMPANY_KEY, id); localStorage.setItem(COMPANY_KEY, id); } catch (e) { /* يبقى للجلسة */ }
+  if (typeof location !== 'undefined') location.assign(location.pathname + location.search);
+}
+// حذف شركة غير فعّالة: بياناتها ونسخها التلقائية ومرفقاتها فقط، وبقية الشركات لا تُمسّ
+export async function deleteCompany(id) {
+  if (id === companyId) throw new Error('بدّل إلى شركة أخرى أولاً ثم احذف هذه');
+  if (!COMPANY_RE.test(id)) throw new Error('شركة غير معروفة');
+  const sfx = id === 'main' ? '' : '@' + id;
+  if (backend === 'idb') {
+    const [data, snaps] = await idbGetMany([dbKeyOf(id), 'snaps' + sfx]);
+    const files = (data && Array.isArray(data.docs) ? data.docs : []).flatMap((d) => (d.files || []).map((f) => f.id));
+    const d = await idb();
+    await new Promise((resolve, reject) => {
+      const tx = d.transaction(IDB_STORE, 'readwrite');
+      const st = tx.objectStore(IDB_STORE);
+      for (const m of Array.isArray(snaps) ? snaps : []) st.delete('snap:' + m.id + sfx);
+      for (const k of [dbKeyOf(id), 'ver' + sfx, 'db-conflict' + sfx, 'snaps' + sfx]) st.delete(k);
+      for (const f of files) st.delete('file:' + f);
+      tx.oncomplete = resolve;
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+  }
+  try { localStorage.removeItem('ahsebha-accounting' + sfx); localStorage.removeItem('ahsebha-accounting' + sfx + ':ver'); } catch (e) { /* لا شيء */ }
+  await updateRegistry((r) => r.filter((c) => c.id !== id));
 }
 
 // ─── المرفقات: صور الإيصالات والفواتير وملفات PDF ───
@@ -807,11 +919,21 @@ export async function fileIds() {
   const keys = await idbOp('readonly', (s) => s.getAllKeys());
   return (keys || []).filter((k) => typeof k === 'string' && k.startsWith('file:')).map((k) => k.slice(5));
 }
+// مرفقات كل الشركات على الجهاز: ملف لا تشير إليه هذه الشركة قد تشير إليه شركة أخرى فلا يُحذف
+async function allUsedFileIds() {
+  const used = usedFileIds();
+  const others = (await readRegistry()).map((c) => c.id).filter((id) => id !== companyId);
+  if (!others.length) return used;
+  const dbs = await idbGetMany(others.map(dbKeyOf));
+  for (const x of dbs) for (const d of (x && Array.isArray(x.docs) ? x.docs : [])) for (const f of d.files || []) used.add(f.id);
+  return used;
+}
 export const usedFileIds = () => new Set((db ? db.docs : []).flatMap((d) => (d.files || []).map((f) => f.id)));
 // يحذف الملفات التي لا يشير إليها أي مستند (نموذج أُلغي، أو مرفق أُزيل) بعد يوم من رفعها
 export async function gcFiles() {
   if (!db || !filesSupported()) return 0;
-  const used = usedFileIds();
+  let used;
+  try { used = await allUsedFileIds(); } catch (e) { return 0; } // تعذّرت قراءة شركة أخرى: الأمان أهم من التنظيف
   const old = Date.now() - 864e5;
   const orphans = (await fileIds()).filter((id) => !used.has(id) && !(parseInt(id.slice(0, 8), 36) > old));
   await deleteFiles(orphans);

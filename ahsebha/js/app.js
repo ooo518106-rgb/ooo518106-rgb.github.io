@@ -28,6 +28,7 @@ import * as reconcile from './views/reconcile.js';
 import * as todayView from './views/today.js';
 import * as subscription from './views/subscription.js';
 import * as gate from './views/gate.js';
+import { openCompanies } from './views/companies.js';
 import { openPalette } from './views/palette.js';
 import * as license from './license.js';
 import { CONFIG } from './plans.js';
@@ -175,9 +176,9 @@ export function renderShell() {
   const brand = html`<a class="side-brand" href="#/"><span class="brand-badge">${raw(logoImg(40))}</span><span>${BRAND.name}<span class="brand-sub">${BRAND.tagline}</span></span></a>`;
   const foot = html`<div class="side-foot">${isInstalled() || justInstalled ? '' : html`<button type="button" class="btn btn-ghost btn-sm side-install" data-install>💻 ثبّت البرنامج على اللابتوب</button>`}<p class="muted small" style="padding:0 12px">🔒 بياناتك محفوظة على هذا الجهاز فقط. نزّل نسخة احتياطية من <a href="#/settings">الإعدادات</a> بشكل دوري. <a href="privacy.html">سياسة الخصوصية</a>${CONFIG.published ? html` · <a href="plans.html" target="_blank" rel="noopener">الباقات</a>` : ''}</p></div>`;
   side.innerHTML = String(db
-    ? html`${brand}<div class="side-co" title="${db.settings.name}">🏢 ${db.settings.name || 'منشأتي'}</div>
+    ? html`${brand}<button type="button" class="side-co" data-companies title="الشركات" aria-label="الشركة الحالية: ${db.settings.name || 'منشأتي'}. افتح قائمة الشركات">🏢 <span class="co-n">${db.settings.name || 'منشأتي'}</span><span class="co-more" aria-hidden="true">▾</span></button>
       <nav>${navItems().map((n) => (n.sec ? html`<div class="nav-sec">${n.sec}</div>` : html`<a class="nav-a${license.lockedFeature(n.h) ? ' locked' : ''}" data-h="${n.h}" href="#/${n.h}"><span class="ic">${n.ic}</span>${n.t}${license.lockedFeature(n.h) ? html`<span class="lk" title="ضمن الاشتراك" aria-label="ضمن الاشتراك">🔒</span>` : ''}</a>`))}</nav>${foot}`
-    : html`${brand}<nav><a class="nav-a on" href="#/welcome"><span class="ic">👋</span>ابدأ هنا</a></nav>${foot}`);
+    : html`${brand}<button type="button" class="side-co" data-companies aria-label="قائمة الشركات">🏢 <span class="co-n">الشركات</span><span class="co-more" aria-hidden="true">▾</span></button><nav><a class="nav-a on" href="#/welcome"><span class="ic">👋</span>ابدأ هنا</a></nav>${foot}`);
   const quick = document.getElementById('quick');
   quick.querySelectorAll('.quick-menu a').forEach((a) => {
     const f = a.dataset.feature || license.featureOfPath(a.getAttribute('href'));
@@ -392,7 +393,7 @@ async function boot() {
   window.addEventListener('acc:save-failed', () => toast('تعذّر الحفظ على هذا الجهاز. صدّر نسخة احتياطية من الإعدادات فوراً', 'err'));
   store.onExternalChange(() => { auth.init(); renderShell(); if (!guard.dirty) rerender(); toast('تحدّثت البيانات من نافذة أخرى', 'warn'); });
   document.getElementById('menu-btn').onclick = () => document.getElementById('app').classList.toggle('nav-open');
-  document.getElementById('side').addEventListener('click', (e) => { if (e.target.closest('[data-install]')) doInstall(); });
+  document.getElementById('side').addEventListener('click', (e) => { if (e.target.closest('[data-install]')) doInstall(); else if (e.target.closest('[data-companies]')) openCompanies(); });
   document.getElementById('scrim').onclick = closeNav;
   document.addEventListener('click', (e) => {
     const q = document.getElementById('quick');
