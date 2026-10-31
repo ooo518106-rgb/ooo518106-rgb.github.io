@@ -4,7 +4,7 @@
 // البيانات المشفّرة قد تكون نص JSON للنسخة العادية أو ملف ZIP للنسخة الكاملة مع المرفقات (kind).
 const APP = 'kenz-encrypted-backup';
 export const ITERATIONS = 600000;
-export const MIN_PASSWORD = 6;
+export const MIN_PASSWORD = 12;
 export const WRONG = 'كلمة السر غير صحيحة، أو الملف تالف';
 
 const b64 = (u8) => {
@@ -29,7 +29,7 @@ export function isEncryptedBackup(text) {
 
 // bytes: Uint8Array (نص JSON مرمّز أو ZIP)؛ يرجّع نص ملف النسخة المشفّرة
 export async function encryptBytes(bytes, password, { kind = 'json', iter = ITERATIONS } = {}) {
-  if (String(password || '').length < MIN_PASSWORD) throw new Error(`كلمة السر ${MIN_PASSWORD} خانات على الأقل`);
+  if (String(password || '').length < MIN_PASSWORD) throw new Error(`كلمة السر لازم تكون ${MIN_PASSWORD} خانة على الأقل`);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await keyFor(password, salt, iter, ['encrypt']);
