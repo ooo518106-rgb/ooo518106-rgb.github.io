@@ -88,6 +88,7 @@ export function form(kind, { root, params }) {
       <div class="span2">${f('العنوان', 'address')}</div>
       <div>${f(kind === 'customer' ? 'الرصيد الافتتاحي (عليه لكم)' : 'الرصيد الافتتاحي (له عليكم)', 'opening', 'type="text" inputmode="decimal" data-num autocomplete="off"', { hint: `الرصيد في ${s.startDate ? fmtDate(s.startDate) : 'تاريخ بداية التشغيل'}. اكتبه بالسالب إذا كان العكس.` })}</div>
       ${kind === 'customer' ? html`<div>${f('حد الدين', 'creditLimit', 'type="text" inputmode="decimal" data-num autocomplete="off"', { hint: 'أقصى مبلغ آجل لهذا العميل. اتركه فارغاً لعدم وضع حد. يُنبَّه أو يُمنع عند تجاوزه حسب الإعدادات' })}</div>` : ''}
+      ${kind === 'customer' && store.getDb().priceLists.length ? html`<div>${field('قائمة الأسعار', html`<select class="inp" data-k="priceList"><option value="">سعر البيع العادي</option>${store.getDb().priceLists.map((l) => html`<option value="${l.id}" ${p.priceList === l.id ? raw('selected') : ''}>${l.name} (${num(l.pct) > 0 ? '+' : ''}${num(l.pct)}%)</option>`)}</select>`, { hint: 'تنطبق أسعارها تلقائياً عند البيع لهذا العميل' })}</div>` : ''}
       <div class="span-all">${field('ملاحظات', html`<textarea class="inp" data-k="notes" rows="2">${p.notes || ''}</textarea>`)}</div>
     </div></div>
     <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ</button></div></form>`);
@@ -104,7 +105,7 @@ export function form(kind, { root, params }) {
     if (!showErrors(root, errs)) return;
     p.opening = num(p.opening);
     // الصفر يعني «بلا حد»، ويُكتب صراحة لأن الحفظ يدمج مع المحفوظ فلا يزول الحذف وحده
-    if (kind === 'customer') p.creditLimit = num(p.creditLimit) > 0 ? num(p.creditLimit) : 0; else delete p.creditLimit;
+    if (kind === 'customer') { p.creditLimit = num(p.creditLimit) > 0 ? num(p.creditLimit) : 0; p.priceList = store.findPriceList(p.priceList) ? p.priceList : ''; } else { delete p.creditLimit; delete p.priceList; }
     for (const k of ['nameEn', 'phone', 'email', 'crNo', 'address', 'notes']) p[k] = String(p[k] || '').trim();
     const saved = store.saveParty(p);
     guard.dirty = false;
@@ -133,7 +134,7 @@ export function show(kind, { root, params, query, path }) {
 
   root.innerHTML = String(html`
     ${head(p.name, {
-      sub: html`${[p.phone, p.vatNo ? 'ضريبي ' + p.vatNo : '', p.address].filter(Boolean).join(' · ') || W.one}`,
+      sub: html`${[p.phone, p.vatNo ? 'ضريبي ' + p.vatNo : '', p.address, store.findPriceList(p.priceList) ? 'قائمة أسعار: ' + store.findPriceList(p.priceList).name : ''].filter(Boolean).join(' · ') || W.one}`,
       actions: html`<a class="btn btn-primary" href="${W.newDoc[0]}?party=${p.id}">${W.newDoc[1]}</a>
         <a class="btn btn-ghost" href="${W.voucher[0]}?party=${p.id}">${W.voucher[1]}</a>
         ${p.phone ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}

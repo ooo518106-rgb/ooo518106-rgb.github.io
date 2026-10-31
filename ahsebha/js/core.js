@@ -1079,6 +1079,21 @@ export function creditCheck(db, books, doc, existing = null) {
   return after > limit ? { limit, balance, adds, after, over: round(after - limit, dec) } : null;
 }
 
+// سعر المنتج حسب قائمة أسعار العميل. بلا قائمة: السعر الأساسي (وللوحدة الإضافية سعرها الخاص أو الأساسي × معاملها).
+// بقائمة: سعر المنتج الخاص بالقائمة (product.listPrices) إن وُجد، وإلا السعر الأساسي بنسبة القائمة (السالبة خصم)
+export function listPrice(db, product, listId, unit = null) {
+  const dec = currencyInfo(db.settings?.currency).dec;
+  const f = unit ? num(unit.factor) || 1 : 1;
+  const explicit = unit && unit.price != null && unit.price !== '' ? num(unit.price) : null;
+  const plain = explicit != null ? explicit : unit ? round(num(product.price) * f, 4) : num(product.price);
+  const list = listId ? (db.priceLists || []).find((l) => l.id === listId) : null;
+  if (!list) return plain;
+  const own = product.listPrices ? product.listPrices[list.id] : undefined;
+  if (explicit == null && own != null && own !== '' && num(own) >= 0) return unit ? round(num(own) * f, 4) : num(own);
+  const pct = num(list.pct);
+  return pct ? round(plain * Math.max(0, 1 + pct / 100), dec) : plain;
+}
+
 // نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله)
 export function stockShortages(db, books, doc, existing = null) {
   if (!doc || (doc.type !== 'sale' && doc.type !== 'preturn')) return [];

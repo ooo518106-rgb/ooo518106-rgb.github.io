@@ -1,11 +1,11 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck, listPrice } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
 import { can, usersEnabled } from '../auth.js';
-import { docGate, demoError } from '../license.js';
+import { docGate, demoError, has as hasFeature } from '../license.js';
 import { handleDemoError } from './subscription.js';
 
 const HELD_KEY = 'ahsebha-pos-held';
@@ -131,9 +131,35 @@ export function pos({ root }) {
     $('[data-held]', root).disabled = !held.length;
   }
 
+  // قائمة أسعار عميل السلة (من الميزات): تحدد سعر الصنف عند إضافته
+  const cartList = () => {
+    if (!hasFeature('pricelists')) return '';
+    const l = store.findPriceList((store.findParty(cart.party) || {}).priceList);
+    return l ? l.id : '';
+  };
+  const plain = (p, unit) => (unit ? (unit.price !== '' && unit.price != null ? num(unit.price) : round(num(p.price) * num(unit.factor), dec())) : num(p.price));
+  // اختيار عميل بقائمة مختلفة: نعرض تطبيقها على ما في السلة (ويعود السعر العادي إن لم يكن له قائمة)
+  async function offerReprice() {
+    const lid = cartList();
+    const rows = [];
+    for (const l of cart.lines) {
+      const p = store.findProduct(l.product);
+      if (!p) continue;
+      const u = l.unit ? (p.units || []).find((x) => x.name === l.unit) || null : null;
+      const price = lid ? listPrice(store.getDb(), p, lid, u) : plain(p, u);
+      if (num(l.price) !== price) rows.push({ l, price });
+    }
+    if (!rows.length) return;
+    const name = lid ? store.findPriceList(lid).name : 'سعر البيع العادي';
+    if (!(await confirmBox(`تطبيق «${name}» على ما في السلة؟ سيتغير سعر ${rows.length} صنفاً.`, { ok: 'طبّق الأسعار', title: 'قائمة أسعار العميل' }))) return;
+    for (const { l, price } of rows) l.price = price;
+    drawCart();
+  }
+
   function add(p, qty = 1, unit = null) {
     const f = unit ? num(unit.factor) : 1;
-    const price = unit ? (unit.price !== '' && unit.price != null ? num(unit.price) : round(num(p.price) * f, dec())) : num(p.price);
+    const lid = cartList();
+    const price = lid ? listPrice(store.getDb(), p, lid, unit) : plain(p, unit);
     const uname = unit ? unit.name : '';
     if (blocks(p, qty * f)) return;
     const i = cart.lines.findIndex((l) => l.product === p.id && (l.unit || '') === uname && num(l.price) === price && !num(l.disc));
@@ -428,7 +454,7 @@ export function pos({ root }) {
   combo($('[data-party]', root), {
     items: partyItems('customer'),
     onType: () => { cart.party = null; },
-    onPick: (it) => { cart.party = it.value; $('[data-party]', root).value = it.label; scan.focus(); },
+    onPick: (it) => { cart.party = it.value; $('[data-party]', root).value = it.label; scan.focus(); offerReprice(); },
     onCreate: (text) => quickParty('customer', text),
     createLabel: 'عميل جديد',
   });
