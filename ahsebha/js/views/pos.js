@@ -1,6 +1,6 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck, listPrice, isLotTracked } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck, listPrice, isLotTracked, isSerialTracked, serialChoices, serialConflicts, serialKey, lineSerials } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
@@ -112,7 +112,7 @@ export function pos({ root }) {
     const T = calc();
     const box = $('[data-lines]', root);
     box.innerHTML = cart.lines.length ? String(html`${cart.lines.map((l, i) => html`<div class="pos-line" data-i="${i}">
-        <button class="pl-name" data-edit="${i}">${l.desc}${l.unit ? html` <small class="badge badge-muted">${l.unit}</small>` : ''}${num(l.disc) ? html` <small class="badge badge-info">خصم ${num(l.disc)}%</small>` : ''}<small class="muted">${money(l.price)} × ${num(l.qty)}</small></button>
+        <button class="pl-name" data-edit="${i}">${l.desc}${l.unit ? html` <small class="badge badge-muted">${l.unit}</small>` : ''}${num(l.disc) ? html` <small class="badge badge-info">خصم ${num(l.disc)}%</small>` : ''}<small class="muted">${money(l.price)} × ${num(l.qty)}</small>${lineSerials(l).length ? html`<small class="muted" dir="ltr">${lineSerials(l).join('، ')}</small>` : ''}</button>
         <div class="pl-qty"><button data-dec="${i}" aria-label="إنقاص">−</button><span>${num(l.qty)}</span><button data-inc="${i}" aria-label="زيادة">+</button></div>
         <b class="pl-tot">${money(T.lines[i].total)}</b>
         <button class="icon-btn" data-del="${i}" aria-label="حذف">✕</button></div>`)}`)
@@ -157,7 +157,50 @@ export function pos({ root }) {
     drawCart();
   }
 
+  // منتج بأرقام تسلسلية: كل قطعة بسطرها ورقمها (يُمسح بالباركود أو يُكتب)، فلا دمج للكميات
+  async function addSerial(p, n = 1, unit = null) {
+    if (unit && num(unit.factor) !== 1) { toast('المنتج ذو الأرقام التسلسلية يُباع بالقطعة لا بالكرتون', 'err'); return; }
+    const lid = cartList();
+    const price = lid ? listPrice(store.getDb(), p, lid, null) : plain(p, null);
+    for (let k = 0; k < n; k++) {
+      const sn = await askSerial(p);
+      if (!sn) break;
+      cart.lines.push({ product: p.id, desc: p.name, qty: 1, price, disc: 0, tax: p.tax || 'S', serials: [sn] });
+      drawCart(); drawGrid();
+    }
+    scan.focus();
+  }
+  function askSerial(p) {
+    const wh = posWh();
+    const inCart = new Set(cart.lines.filter((l) => l.product === p.id).flatMap((l) => lineSerials(l).map(serialKey)));
+    const list = serialChoices(store.getBooks(), p.id, wh || null).filter((x) => !inCart.has(serialKey(x))).slice(0, 200);
+    return modal({
+      title: `الرقم التسلسلي: ${p.name}`,
+      body: html`<form novalidate>${field('الرقم التسلسلي', html`<input class="inp pos-big" name="sn" dir="ltr" autocomplete="off" list="pos-sn-list" placeholder="امسح الباركود أو اكتب الرقم" autofocus aria-label="الرقم التسلسلي"><datalist id="pos-sn-list">${list.map((x) => html`<option value="${x}">`)}</datalist>`)}
+        <small class="fld-e" data-err="sn" hidden></small>
+        <div class="dlg-actions"><button class="btn btn-primary">إضافة للسلة <small>Enter</small></button><button type="button" class="btn btn-ghost" data-no>إلغاء</button></div></form>`,
+      onMount: (dlg, done) => {
+        const f = $('form', dlg);
+        $('[data-no]', dlg).onclick = () => done(null);
+        f.onsubmit = (e) => {
+          e.preventDefault();
+          const sn = f.sn.value.trim();
+          const fail = (msg) => { const el = $('[data-err="sn"]', dlg); el.textContent = msg; el.hidden = false; f.sn.focus(); f.sn.select(); };
+          if (!sn) { fail('اكتب الرقم التسلسلي'); return; }
+          if (inCart.has(serialKey(sn))) { fail('هذا الرقم في السلة'); return; }
+          const rec = store.getBooks().serials.get(p.id)?.get(serialKey(sn));
+          if (rec && rec.status === 'sold') { fail('هذا الرقم مباع مسبقاً'); return; }
+          if (rec && rec.status === 'out') { fail('هذا الرقم خرج من المخزون (مرتجع للمورد أو إتلاف)'); return; }
+          if (!rec && S().negativeStock === 'block') { fail('هذا الرقم غير مسجَّل في المخزون'); return; }
+          if (!rec) toast('تنبيه: الرقم غير مسجَّل في المخزون', 'warn');
+          done(sn);
+        };
+      },
+    });
+  }
+
   function add(p, qty = 1, unit = null) {
+    if (isSerialTracked(p)) { addSerial(p, Math.max(1, Math.floor(qty)), unit); return; }
     const f = unit ? num(unit.factor) : 1;
     const lid = cartList();
     const price = lid ? listPrice(store.getDb(), p, lid, unit) : plain(p, unit);
@@ -212,7 +255,7 @@ export function pos({ root }) {
         $('[data-remove]', dlg).onclick = () => { cart.lines.splice(i, 1); done(true); };
         f.onsubmit = (e) => {
           e.preventDefault();
-          const q = num(f.qty.value);
+          const q = lineSerials(l).length ? 1 : num(f.qty.value);
           // مع «منع المخزون السالب»: الكمية الجديدة لا تتجاوز المتوفر بعد احتساب بقية السلة
           const p = store.findProduct(l.product);
           const extra = (q - num(l.qty)) * lineFactor(l);
@@ -273,7 +316,7 @@ export function pos({ root }) {
     if (!result) { scan.focus(); return; }
     const doc = {
       type: 'sale', date: today(), party: cart.party || null, vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive,
-      lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}) })),
+      lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}), ...(lineSerials(l).length ? { serials: lineSerials(l) } : {}) })),
       notes: '', payments: result.payments.filter((p) => p.amount > 0), pos: true,
       ...(cart.discMode ? { discMode: cart.discMode, discVal: num(cart.discVal) } : {}),
     };
@@ -283,6 +326,9 @@ export function pos({ root }) {
     if (result.tendered) { doc.tendered = result.tendered; doc.change = round(result.tendered - (result.payments.find((p) => p.acc === accs.cash.id)?.amount || 0), dec()); }
     const errs = validateDoc(store.getDb(), doc);
     if (Object.keys(errs).length) { toast(Object.values(errs)[0], 'err'); return; }
+    // أرقام تسلسلية بيعت من نافذة أخرى بعد تعبئة السلة (غير المسجَّل منها سُئل عنه عند إضافته)
+    const bad = serialConflicts(store.getDb(), doc).filter((c) => c.kind !== 'unknown');
+    if (bad.length) { toast(bad[0].msg, 'err'); return; }
     // الحماية الأخيرة لسياسة المنع: قد يتغير المخزون من نافذة أخرى بعد تعبئة السلة
     if (S().negativeStock === 'block') {
       const short = stockShortages(store.getDb(), store.getBooks(), doc)[0];
@@ -442,7 +488,7 @@ export function pos({ root }) {
     const c = t.closest('[data-cat]');
     if (c) { cat = c.dataset.cat; $$('[data-cat]', root).forEach((b) => b.classList.toggle('on', b === c)); drawGrid(); return; }
     const inc = t.closest('[data-inc]'), dec_ = t.closest('[data-dec]'), del = t.closest('[data-del]'), ed = t.closest('[data-edit]');
-    if (inc) { const l = cart.lines[inc.dataset.inc]; const p = store.findProduct(l.product); if (p && blocks(p, lineFactor(l))) return; l.qty = round(num(l.qty) + 1, 3); drawCart(); drawGrid(); return; }
+    if (inc) { const l = cart.lines[inc.dataset.inc]; const p = store.findProduct(l.product); if (p && isSerialTracked(p)) { addSerial(p); return; } if (p && blocks(p, lineFactor(l))) return; l.qty = round(num(l.qty) + 1, 3); drawCart(); drawGrid(); return; }
     if (dec_) { const i = Number(dec_.dataset.dec); const l = cart.lines[i]; l.qty = round(num(l.qty) - 1, 3); if (l.qty <= 0) cart.lines.splice(i, 1); drawCart(); drawGrid(); return; }
     if (del) { cart.lines.splice(Number(del.dataset.del), 1); drawCart(); drawGrid(); return; }
     if (ed) { editLine(Number(ed.dataset.edit)); return; }

@@ -23,7 +23,7 @@ const EMOJI = {
   '🎫': 'ticket', '🔗': 'link', '⬆️': 'upload', '🔀': 'shuffle', '🚀': 'rocket', '⏹️': 'square', '⚡': 'zap', '🧮': 'calculator', '✨': 'sparkles',
   '🆕': 'sparkles', '📅': 'calendar', '🏠': 'house', '🧭': 'compass', '🤝': 'handshake', '🧰': 'wrench', '👁️': 'eye', '❌': 'circle-x',
   '➖': 'minus', '🌍': 'globe', '🎉': 'party-popper', '📍': 'map-pin', '⬜': 'square', '⏰': 'alarm-clock', '▶️': 'play', '🖼️': 'image',
-  '🔳': 'qr-code', '👑': 'crown', '⏱️': 'timer', '📴': 'wifi-off', '☰': 'menu',
+  '🔳': 'qr-code', '🛡️': 'shield-check', '👑': 'crown', '⏱️': 'timer', '📴': 'wifi-off', '☰': 'menu',
   '🍎': 'apple', '🪟': 'windows', '🐧': 'linux',
 };
 // أيقونات تُستدعى مباشرة من الشيفرة (القائمة السفلية، البحث، الأسهم…)

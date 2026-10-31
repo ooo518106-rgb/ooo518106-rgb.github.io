@@ -241,6 +241,7 @@ export const EMOJI = {
   "▶️": "play",
   "🖼️": "image",
   "🔳": "qr-code",
+  "🛡️": "shield-check",
   "👑": "crown",
   "⏱️": "timer",
   "📴": "wifi-off",

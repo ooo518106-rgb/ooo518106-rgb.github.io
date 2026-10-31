@@ -1,12 +1,13 @@
 // ═══ المنتجات والخدمات، بطاقة الصنف، وتسويات المخزون (الجرد) ═══
 import * as store from '../store.js';
-import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor, listPrice, isDate, isLotTracked, lotChoices, MAIN_WH } from '../core.js';
+import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor, listPrice, isDate, isLotTracked, isSerialTracked, lotChoices, serialChoices, serialConflicts, serialKey, lineSerials, MAIN_WH } from '../core.js';
 import { has } from '../license.js';
 import { requireFeature } from './subscription.js';
 import { report as lotsReport, daysText } from './lots.js';
+import { report as serialsReport } from './serials.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel, lotText, lineLots } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel, lotText, lineTrack, parseSerials, splitSerials } from './common.js';
 import { makeStoreBarcode, isEan13, code128Supported, barcodeSVG } from '../barcode.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -48,7 +49,7 @@ export function productList({ root, query }) {
     out.innerHTML = String(html`<div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>قيمة المخزون بالتكلفة: <b>${money(value, { sym: true })}</b></span></div>
       ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="hide-sm">الباركود / الرمز</th><th class="num">سعر البيع</th><th class="num hide-sm">متوسط التكلفة</th><th class="num">الكمية</th><th class="num hide-sm">القيمة</th></tr></thead>
       <tbody>${rows.slice(0, limit).map((p) => { const s = stockOf(p.id); const low = p.type === 'stock' && num(p.reorder) > 0 && s.qty <= num(p.reorder);
-        return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${isLotTracked(p) ? html` <span class="badge badge-info">دفعات</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
+        return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${isLotTracked(p) ? html` <span class="badge badge-info">دفعات</span>` : ''}${isSerialTracked(p) ? html` <span class="badge badge-info">أرقام تسلسلية</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
           <td class="hide-sm code" dir="ltr">${p.barcode || p.sku || ''}</td><td class="num">${money(p.price)}</td><td class="num hide-sm">${p.type === 'stock' ? money(avgCost(p)) : '—'}</td>
           <td class="num">${p.type === 'stock' ? html`<span class="${s.qty < 0 ? 'neg' : low ? 'neg' : ''}">${qty(s.qty)}</span>${low ? html` <span class="badge badge-bad">نفاد</span>` : ''}` : '—'}</td>
           <td class="num hide-sm">${p.type === 'stock' ? money(s.value) : '—'}</td></tr>`; })}</tbody></table></div>
@@ -70,7 +71,7 @@ export function productForm({ root, params, query = {} }) {
   const s = S();
   const existing = params.id ? store.findProduct(params.id) : null;
   if (params.id && !existing) { root.innerHTML = String(empty('🔎', 'المنتج غير موجود')); return; }
-  const p = existing ? { ...existing } : { name: '', nameEn: '', sku: '', barcode: String(query.barcode || '').trim(), category: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true, track: '', openLots: [] };
+  const p = existing ? { ...existing } : { name: '', nameEn: '', sku: '', barcode: String(query.barcode || '').trim(), category: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true, track: '', openLots: [], openSerials: [], warrantyMonths: '' };
   const cats = [...new Set(store.getDb().products.map((x) => x.category).filter(Boolean))];
   const title = existing ? `تعديل: ${existing.name}` : 'منتج أو خدمة جديدة';
   setTitle(title);
@@ -101,8 +102,13 @@ export function productForm({ root, params, query = {} }) {
         ${field('الكمية الافتتاحية', inp('openQty', 'type="text" inputmode="decimal" data-num autocomplete="off"'), { hint: `الموجودة عندك في ${s.startDate ? fmtDate(s.startDate) : 'بداية التشغيل'}` })}
         ${field('تكلفة الوحدة الافتتاحية', inp('openCost', numAttrs))}
         ${field('حد إعادة الطلب', inp('reorder', numAttrs), { hint: 'تنبيه عندما تصل الكمية لهذا الحد' })}
-        ${field('تتبع الدفعات', html`<select class="inp" data-k="track"><option value="" ${p.track === 'lot' ? '' : raw('selected')}>بدون تتبع</option><option value="lot" ${p.track === 'lot' ? raw('selected') : ''}>دفعات وتواريخ انتهاء</option></select>`, { hint: 'للأدوية والأغذية وكل ما له تاريخ انتهاء: يبيع الأقرب انتهاءً أولاً ولا يبيع المنتهي' })}
+        ${field('التتبع', html`<select class="inp" data-k="track"><option value="" ${p.track ? '' : raw('selected')}>بدون تتبع</option><option value="lot" ${p.track === 'lot' ? raw('selected') : ''}>دفعات وتواريخ انتهاء</option><option value="serial" ${p.track === 'serial' ? raw('selected') : ''}>أرقام تسلسلية وكفالة</option></select>`, { hint: 'الدفعات للأدوية والأغذية (يبيع الأقرب انتهاءً ولا يبيع المنتهي). الأرقام التسلسلية للهواتف والأجهزة (رقم لكل قطعة وكفالتها)' })}
       </div>
+      <div data-serial-box hidden style="margin-top:12px"><div class="card-h"><h3>🛡️ الأرقام التسلسلية والكفالة</h3></div>
+        <div class="form-grid">${field('مدة الكفالة (بالأشهر)', html`<input class="inp" data-k="warrantyMonths" data-f="warrantyMonths" type="text" inputmode="numeric" data-num autocomplete="off" value="${p.warrantyMonths ?? ''}" placeholder="12">`, { hint: 'تبدأ من تاريخ البيع. اتركها فارغة إن لم تكن هناك كفالة' })}</div>
+        <div class="fld" style="margin-top:10px"><span class="fld-l">أرقام الرصيد الافتتاحي <small class="muted" data-os-sum></small></span>
+          <textarea class="inp" rows="3" data-os dir="ltr" placeholder="رقم لكل قطعة، واحد بكل سطر" aria-label="الأرقام التسلسلية للرصيد الافتتاحي"></textarea><small class="fld-e" data-err="openSerials" hidden></small></div>
+        <p class="muted small" style="margin-top:8px">ما لم تكتب رقمه من الكمية الافتتاحية يبقى بلا رقم. أرقام ما بعد الافتتاح تُكتب في فواتير الشراء، وكل بيع يحتاج رقم القطعة المباعة.</p></div>
       <div data-lots-box hidden style="margin-top:12px"><div class="card-h"><h3>⏳ دفعات الرصيد الافتتاحي</h3><span class="muted small" data-lots-sum></span></div>
         <div data-lots></div><small class="fld-e" data-err="openLots" hidden></small>
         <button type="button" class="btn btn-ghost btn-sm" data-lot-add style="margin-top:8px">➕ إضافة دفعة</button>
@@ -127,10 +133,16 @@ export function productForm({ root, params, query = {} }) {
   };
   drawUnits();
   // دفعات الرصيد الافتتاحي (للمنتج المتتبَّع): رقم الدفعة وتاريخ انتهائها وكميتها
+  let lastTrack = p.track || ''; // آخر اختيار مقبول للتتبع (للرجوع إليه إن كانت الميزة مقفلة)
   p.openLots = Array.isArray(p.openLots) ? p.openLots.map((x) => ({ ...x })) : [];
+  p.openSerialsText = (Array.isArray(p.openSerials) ? p.openSerials : []).join('\n');
+  const updSerSum = (q = p.openQty) => { const el = $('[data-os-sum]', root); if (el) el.textContent = `(المكتوب ${parseSerials(p.openSerialsText).length} من ${num(q)})`; };
   const lotSum = () => round(p.openLots.reduce((t, x) => t + Math.max(0, num(x.qty)), 0), 3);
   const updLotSum = (q = p.openQty) => { const el = $('[data-lots-sum]', root); if (el) el.textContent = `الموزَّع ${lotSum()} من ${num(q)}`; };
   const drawLots = () => {
+    const serialOn = p.type === 'stock' && p.track === 'serial';
+    $('[data-serial-box]', root).hidden = !serialOn;
+    if (serialOn) { const ta = $('[data-os]', root); if (document.activeElement !== ta) ta.value = p.openSerialsText; updSerSum(); }
     const on = p.type === 'stock' && p.track === 'lot';
     $('[data-lots-box]', root).hidden = !on;
     if (!on) return;
@@ -147,7 +159,8 @@ export function productForm({ root, params, query = {} }) {
   root.addEventListener('input', (e) => {
     const row = e.target.closest('[data-ol]');
     if (row && e.target.dataset.olk) { p.openLots[Number(row.dataset.ol)][e.target.dataset.olk] = e.target.value; guard.dirty = true; updLotSum(); }
-    else if (e.target.dataset.k === 'openQty') updLotSum(e.target.value);
+    else if (e.target.dataset.k === 'openQty') { updLotSum(e.target.value); updSerSum(e.target.value); }
+    else if (e.target.matches('[data-os]')) { p.openSerialsText = e.target.value; guard.dirty = true; updSerSum(); }
   });
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-lot-add]')) { p.openLots.push({ lot: '', exp: '', qty: '' }); drawLots(); $$('[data-ol] [data-olk="lot"]', root).pop()?.focus(); guard.dirty = true; }
@@ -164,7 +177,9 @@ export function productForm({ root, params, query = {} }) {
   root.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
     // تتبع الدفعات من الميزات القابلة للبيع (المنتج الذي فُعّل تتبعه من قبل يبقى كما هو)
-    if (k === 'track' && e.target.value === 'lot' && !has('tracking') && !(existing && existing.track === 'lot')) { e.target.value = ''; p.track = ''; requireFeature('tracking'); return; }
+    const need = k === 'track' ? { lot: 'tracking', serial: 'serials' }[e.target.value] : null;
+    if (need && !has(need) && !(existing && existing.track === e.target.value)) { e.target.value = lastTrack; p.track = lastTrack; drawLots(); requireFeature(need); return; }
+    if (k === 'track') lastTrack = e.target.value;
     if (k === 'active') p.active = e.target.checked;
     else if (k) p[k] = e.target.value;
     if (k === 'type') { toggleStock(); drawLots(); }
@@ -189,6 +204,16 @@ export function productForm({ root, params, query = {} }) {
     else if (p.barcode && store.getDb().products.some((x) => x.id !== p.id && x.barcode === p.barcode)) errs.barcode = 'الباركود مستخدم لمنتج آخر';
     if (num(p.openQty) && !num(p.openCost) && !num(p.cost)) errs.openCost = 'اكتب تكلفة الوحدة للكمية الافتتاحية';
     const tracked = p.type === 'stock' && p.track === 'lot';
+    const serialMode = p.type === 'stock' && p.track === 'serial';
+    const serials = serialMode ? parseSerials(p.openSerialsText) : [];
+    const months = serialMode ? Math.floor(num(p.warrantyMonths)) : 0;
+    if (serialMode) {
+      const typed = String(p.openSerialsText || '').split(/[\n\r,;،\t]+/).filter((x) => x.trim()).length;
+      if (num(p.warrantyMonths) < 0 || months > 240) errs.warrantyMonths = 'مدة الكفالة بين 0 و240 شهراً';
+      if (typed > serials.length) errs.openSerials = 'يوجد رقم مكرر';
+      else if (serials.length > Math.floor(num(p.openQty))) errs.openSerials = `عدد الأرقام (${serials.length}) أكبر من الكمية الافتتاحية (${num(p.openQty)})`;
+      if (num(p.openQty) && !Number.isInteger(num(p.openQty))) errs.openQty = 'كمية المنتج ذي الرقم التسلسلي عدد صحيح';
+    }
     const lotRows = tracked ? p.openLots.filter((x) => String(x.lot || '').trim() || String(x.exp || '').trim() || String(x.qty ?? '').trim() !== '') : [];
     for (const x of lotRows) {
       if (!String(x.lot || '').trim() && !String(x.exp || '').trim()) { errs.openLots = 'لكل دفعة رقم أو تاريخ انتهاء'; break; }
@@ -210,7 +235,9 @@ export function productForm({ root, params, query = {} }) {
     p.units = units;
     const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S',
       nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim(),
-      track: tracked ? 'lot' : '', openLots: lotRows.map((x) => ({ lot: String(x.lot || '').trim(), exp: String(x.exp || '').trim(), qty: num(x.qty) })) };
+      track: tracked ? 'lot' : serialMode ? 'serial' : '', openLots: lotRows.map((x) => ({ lot: String(x.lot || '').trim(), exp: String(x.exp || '').trim(), qty: num(x.qty) })),
+      openSerials: serials, warrantyMonths: serialMode ? months : 0 };
+    delete out.openSerialsText;
     // أسعار القوائم: ما كُتب فقط، والفارغ يتبع نسبة القائمة
     out.listPrices = {};
     for (const el of $$('[data-lp]', root)) if (String(el.value).trim() !== '' && num(el.value) >= 0) out.listPrices[el.dataset.lp] = num(el.value);
@@ -233,6 +260,18 @@ function lotsCard(p) {
     ${rows.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>الدفعة</th><th>الانتهاء</th><th>الحالة</th>${multi ? html`<th class="hide-sm">المستودع</th>` : ''}<th class="num">الكمية</th></tr></thead><tbody>
       ${rows.map((r) => html`<tr><td dir="auto">${r.lot || '—'}</td><td class="nowrap">${r.exp ? fmtDate(r.exp) : 'بلا تاريخ'}${r.days != null ? html`<small class="c-sub">${daysText(r)}</small>` : ''}</td><td><span class="badge ${tone[r.state][1]}">${tone[r.state][0]}</span></td>${multi ? html`<td class="hide-sm">${whLabel(r.wh) || 'الرئيسي'}</td>` : ''}<td class="num ${r.qty < 0 ? 'neg' : ''}">${qty(r.qty)} ${p.unit || ''}</td></tr>`)}</tbody></table></div>`
       : html`<p class="muted">لا توجد دفعات فيها رصيد. اكتب رقم الدفعة وتاريخ انتهائها في فاتورة الشراء.</p>`}</div>`;
+}
+
+// أرقام المنتج التسلسلية في بطاقته: كم في المخزون وكم بِيع وكفالاتها، ورابط للبحث بها
+function serialsCard(p) {
+  const rows = serialsReport().rows.filter((r) => r.product.id === p.id);
+  const n = (f) => rows.filter(f).length;
+  const months = Math.floor(num(p.warrantyMonths));
+  return html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🛡️ الأرقام التسلسلية والكفالة</h3><a class="btn btn-ghost btn-sm" href="#/serials?q=${encodeURIComponent(p.name)}">عرض الأرقام</a></div>
+    <div class="grid g4"><div><div class="kpi-l">في المخزون</div><div class="kpi-v">${n((r) => r.status === 'in')}</div></div>
+      <div><div class="kpi-l">مباعة</div><div class="kpi-v">${n((r) => r.status === 'sold')}</div></div>
+      <div><div class="kpi-l">كفالات سارية</div><div class="kpi-v">${n((r) => r.warranty === 'active' || r.warranty === 'soon')}</div></div>
+      <div><div class="kpi-l">مدة الكفالة</div><div class="kpi-v">${months ? `${months} شهراً` : 'بلا كفالة'}</div></div></div></div>`;
 }
 
 // ═══ بطاقة الصنف ═══
@@ -271,6 +310,7 @@ export function productShow({ root, params, query, path }) {
     ${p.type === 'stock' && store.getDb().warehouses.length ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🏬 الكمية في المستودعات</h3><a class="btn btn-ghost btn-sm" href="#/stock-transfers/new?product=${p.id}">🚚 تحويل</a></div><div class="list-mini">
       ${store.getDb().warehouses.map((w) => { const q = store.getBooks().whQty.get(p.id)?.get(w.id) || 0; return html`<div class="it"><span>${whLabel(w.id)}</span><b class="${q < 0 ? 'neg' : ''}">${qty(q)} ${p.unit || ''}</b></div>`; })}</div></div>` : ''}
     ${isLotTracked(p) ? lotsCard(p) : ''}
+    ${isSerialTracked(p) ? serialsCard(p) : ''}
     ${(p.units || []).length ? html`<p class="muted small" style="margin-bottom:12px">الوحدات: ${p.unit || 'حبة'} (${money(p.price)})${p.units.map((u) => ` · ${u.name} = ${u.factor} (${money(u.price !== '' && u.price != null ? u.price : u.factor * num(p.price))})`)}</p>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       ${p.type === 'stock' ? html`<div class="kpi"><span class="kpi-l">الكمية المتوفرة</span><span class="kpi-v ${st.qty < 0 || (num(p.reorder) && st.qty <= num(p.reorder)) ? 'neg' : ''}">${qty(st.qty)} <small class="cur">${p.unit || ''}</small></span>${num(p.reorder) ? html`<span class="kpi-s">حد الطلب ${num(p.reorder)}</span>` : ''}</div>
@@ -346,6 +386,15 @@ export function form(type, { root, params, query }) {
     }
     return html`<span class="lot-line"><input class="inp lot-n" data-lk="lot" value="${l.lot || ''}" placeholder="رقم الدفعة (للزيادة)" dir="auto" aria-label="رقم الدفعة، بند ${i + 1}"><input class="inp lot-d" type="date" data-lk="exp" value="${l.exp || ''}" aria-label="تاريخ الانتهاء، بند ${i + 1}"></span><small class="fld-e" data-err="lot${i}" hidden></small><small class="fld-e" data-err="exp${i}" hidden></small>`;
   };
+  // الأرقام التسلسلية في سطر التسوية: رقم لكل قطعة من الفرق (زيادة أو نقص)، وللنقص اختيار من المتوفر
+  const serialCell = (l, i, p) => {
+    const list = lineSerials(l);
+    const want = Math.abs(num(l.qty));
+    const taken = new Set(list.map(serialKey));
+    const more = num(l.qty) < 0 ? serialChoices(store.getBooks(), p.id, whKey()).filter((x) => !taken.has(serialKey(x))).slice(0, 300) : [];
+    return html`<div class="serial-line"><textarea class="inp" rows="${Math.min(4, Math.max(2, list.length))}" data-sk dir="ltr" data-f="serials${i}" placeholder="رقم لكل قطعة من الفرق، واحد في كل سطر" aria-label="الأرقام التسلسلية، بند ${i + 1}">${list.join('\n')}</textarea>
+      <div class="serial-meta"><small class="c-sub ${list.length === want ? '' : 'neg'}" data-scount>الأرقام: ${list.length} من ${want}</small>${more.length ? html`<select class="inp" data-spick aria-label="إضافة رقم من المتوفر، بند ${i + 1}"><option value="">+ من المتوفر (${more.length})</option>${more.map((c) => html`<option value="${c}">${c}</option>`)}</select>` : ''}</div></div><small class="fld-e" data-err="serials${i}" hidden></small>`;
+  };
   const title = existing ? `تعديل تسوية ${docNo(existing, s)}` : 'تسوية مخزون جديدة';
   setTitle(title);
   // الكمية الحالية قبل هذه التسوية (بإلغاء أثرها إن كانت قديمة)
@@ -379,7 +428,7 @@ export function form(type, { root, params, query }) {
           <div class="a-delta" data-label="الفرق (+ زيادة / − نقص)"><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="qty${i}" data-delta value="${l.qty}"></div>
           <div class="a-cost" data-label="تكلفة الوحدة (للزيادة)"><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-cost value="${l.cost ?? ''}" placeholder="${p ? round(avgCost(p), dec()) : ''}"></div>
           <div class="a-del"><button type="button" class="icon-btn" data-del aria-label="حذف">✕</button></div>
-          ${p && isLotTracked(p) ? html`<div class="a-lot" data-label="الدفعة">${lotCell(l, i, p)}</div>` : ''}</div>`; })}
+          ${p && isLotTracked(p) ? html`<div class="a-lot" data-label="الدفعة">${lotCell(l, i, p)}</div>` : ''}${p && isSerialTracked(p) ? html`<div class="a-lot" data-label="الأرقام التسلسلية">${serialCell(l, i, p)}</div>` : ''}</div>`; })}
     </div>`);
     $$('.adj-line[data-i]', box).forEach((row) => {
       const i = Number(row.dataset.i);
@@ -393,6 +442,7 @@ export function form(type, { root, params, query }) {
   // الفرق إن غيّر إشارته تبدّل خلية الدفعة بين كتابة الدفعة (زيادة) واختيارها (نقص)
   function refreshLot(tr, l, before) {
     const cell = $('.a-lot', tr);
+    if (cell && isSerialTracked(store.findProduct(l.product))) { cell.innerHTML = String(serialCell(l, Number(tr.dataset.i), store.findProduct(l.product))); return; }
     if (!cell || (num(before) < 0) === (num(l.qty) < 0)) return;
     delete l.lot; delete l.exp;
     cell.innerHTML = String(lotCell(l, Number(tr.dataset.i), store.findProduct(l.product)));
@@ -416,8 +466,21 @@ export function form(type, { root, params, query }) {
       refreshLot(tr, l, before);
     } else if (e.target.matches('[data-cost]')) l.cost = e.target.value;
     else if (e.target.dataset.lk) l[e.target.dataset.lk] = e.target.value;
+    else if (e.target.matches('[data-sk]')) {
+      l.serials = splitSerials(e.target.value);
+      const c = $('[data-scount]', tr);
+      if (c) { c.textContent = `الأرقام: ${l.serials.length} من ${Math.abs(num(l.qty))}`; c.classList.toggle('neg', l.serials.length !== Math.abs(num(l.qty))); }
+    }
   });
   box.addEventListener('change', (e) => {
+    if (e.target.matches('[data-spick]') && e.target.value) {
+      const ta = $('[data-sk]', e.target.closest('.adj-line'));
+      ta.value = splitSerials(ta.value).concat(e.target.value).join('\n');
+      e.target.querySelector(`option[value="${CSS.escape(e.target.value)}"]`)?.remove();
+      e.target.value = '';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (!e.target.matches('[data-lpick]')) return;
     const l = d.lines[Number(e.target.closest('.adj-line[data-i]').dataset.i)];
     const [lot, exp] = e.target.value ? e.target.value.split('|') : ['', ''];
@@ -431,11 +494,20 @@ export function form(type, { root, params, query }) {
     const del = e.target.closest('[data-del]');
     if (del) { d.lines.splice(Number(del.closest('.adj-line').dataset.i), 1); if (!d.lines.length) d.lines.push({ product: null, qty: '', cost: '' }); draw(); }
   });
-  $('[data-form]', root).onsubmit = (e) => {
+  $('[data-form]', root).onsubmit = async (e) => {
     e.preventDefault();
     const doc = { ...d, notes: String(d.notes || '').trim(), lines: d.lines.filter((l) => l.product || l.qty !== '').map((l) => ({ product: l.product, qty: num(l.qty), cost: l.cost === '' || l.cost == null ? '' : num(l.cost),
-      ...(isLotTracked(store.findProduct(l.product)) && (String(l.lot || '').trim() || String(l.exp || '').trim()) ? { lot: String(l.lot || '').trim(), exp: String(l.exp || '').trim() } : {}) })) };
-    if (!showErrors(root, validateDoc(store.getDb(), doc))) { toast('راجع الحقول المظللة', 'err'); return; }
+      ...(isLotTracked(store.findProduct(l.product)) && (String(l.lot || '').trim() || String(l.exp || '').trim()) ? { lot: String(l.lot || '').trim(), exp: String(l.exp || '').trim() } : {}),
+      ...(isSerialTracked(store.findProduct(l.product)) && lineSerials(l).length ? { serials: lineSerials(l) } : {}) })) };
+    const errs = validateDoc(store.getDb(), doc);
+    // الأرقام التسلسلية: زيادة لرقم موجود، أو نقص لرقم مباع أو خارج، ممنوعان، وغير المسجَّل يُسأل عنه
+    if (!Object.keys(errs).length) {
+      const conf = serialConflicts(store.getDb(), doc, existing);
+      for (const c of conf.filter((x) => x.kind !== 'unknown' || s.negativeStock === 'block')) errs['serials' + c.i] = errs['serials' + c.i] ? `${errs['serials' + c.i]}، ${c.msg}` : c.msg;
+      const unknown = conf.filter((x) => x.kind === 'unknown');
+      if (!Object.keys(errs).length && unknown.length && !(await confirmBox(`أرقام غير مسجَّلة في المخزون: ${unknown.map((x) => x.serial).slice(0, 6).join('، ')}. هل تريد المتابعة؟`, { ok: 'متابعة الحفظ', title: 'أرقام تسلسلية غير مسجَّلة' }))) return;
+    }
+    if (!showErrors(root, errs)) { toast('راجع الحقول المظللة', 'err'); return; }
     store.saveDoc(doc);
     guard.dirty = false;
     toast('تم حفظ التسوية ✓');
@@ -453,7 +525,7 @@ export function show(type, { root, params }) {
   setTitle('تسوية مخزون ' + no);
   const costs = B.lineCosts.get(d.id) || [];
   const table = html`<table class="tbl" data-table><thead><tr><th>الصنف</th><th class="num">الفرق</th><th class="num">تكلفة الوحدة</th><th class="num">القيمة</th></tr></thead><tbody>
-    ${(d.lines || []).map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineLots(B, d, i) ? html`<small class="c-sub">${lineLots(B, d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)}</td><td class="num">${costs[i] ? money(costs[i].unit) : ''}</td><td class="num">${costs[i] ? money(Math.sign(num(l.qty)) * costs[i].cost) : ''}</td></tr>`)}
+    ${(d.lines || []).map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineTrack(B, d, i) ? html`<small class="c-sub">${lineTrack(B, d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)}</td><td class="num">${costs[i] ? money(costs[i].unit) : ''}</td><td class="num">${costs[i] ? money(Math.sign(num(l.qty)) * costs[i].cost) : ''}</td></tr>`)}
   </tbody></table>`;
   root.innerHTML = String(html`
     ${head('تسوية مخزون ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-ghost" data-print>🖨️ طباعة</button>${docLocked(d) ? '' : html`<a class="btn btn-ghost" href="#/adjustments/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}

@@ -1,13 +1,13 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice, addMonths, installmentRows, daysBetween, isLotTracked, lotChoices, MAIN_WH } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice, addMonths, installmentRows, daysBetween, isLotTracked, lotChoices, isSerialTracked, serialChoices, serialConflicts, serialKey, lineSerials, MAIN_WH } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, docStatus, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, moneyOptions, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
-  docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel, lotText,
+  docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel, lotText, splitSerials,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
 import { scanForPurchase, takeDraft, receiptCheck } from './scan.js';
@@ -156,7 +156,7 @@ export function form(type, { root, params, query }) {
     if (type === 'quote') d.validUntil = addDays(d.date, 15);
     const src = store.findDoc(query.from || query.copy);
     if (src && src.lines) {
-      d.party = src.party; d.lines = clone(src.lines).map(({ lot, exp, ...rest }) => rest); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
+      d.party = src.party; d.lines = clone(src.lines).map(({ lot, exp, serials, ...rest }) => rest); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
       if (src.discMode) { d.discMode = src.discMode; d.discVal = src.discVal; }
       if (query.from && NO_POSTING.includes(src.type)) d.fromQuote = src.id;
       if (src.type === 'porder' || src.type === 'sorder') { d.dueDate = ''; d.ref = src.ref || ''; }
@@ -303,12 +303,24 @@ export function form(type, { root, params, query }) {
     const avail = round(have + mine, 3);
     const want = round(d.lines.filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0), 3);
     const expired = byLot ? round(total - have, 3) : 0;
-    return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail} ${p.unit || ''}${expired > 0 ? ` (${expired} منتهية الصلاحية لا تُباع)` : ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
+    return html`<small class="c-sub ${want > avail ? 'neg' : ''}" data-hint>المتوفر: ${avail} ${p.unit || ''}${expired > 0 ? ` (${expired} منتهية الصلاحية لا تُباع)` : ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
   }
 
   // الدفعة في بند منتج متتبَّع: الوارد (شراء، مرتجع مبيعات) يكتب رقمها وتاريخها، والصادر (بيع، مرتجع مشتريات) يختارها أو يترك السحب تلقائياً
   const stockMoves = !NO_POSTING.includes(type);
   const whKey = () => (store.getDb().warehouses.length ? (d.wh || MAIN_WH) : null);
+  // الأرقام التسلسلية في بند منتج متتبَّع: رقم لكل قطعة (سطر لكل رقم، أو يُمسح بالباركود)، وللبيع والمرتجع للمورد اختيار من المتوفر
+  function serialCell(l, i) {
+    const p = store.findProduct(l.product);
+    if (!stockMoves || !isSerialTracked(p)) return '';
+    const list = lineSerials(l);
+    const out = type === 'sale' || type === 'preturn';
+    const want = round(num(l.qty) * lineFactor(l), 6);
+    const taken = new Set(list.map(serialKey));
+    const more = out ? serialChoices(store.getBooks(), p.id, whKey()).filter((x) => !taken.has(serialKey(x))).slice(0, 300) : [];
+    return html`<div class="serial-line"><textarea class="inp" rows="${Math.min(4, Math.max(2, list.length))}" data-sk dir="ltr" data-f="serials${i}" placeholder="${out ? 'امسح أو اكتب الرقم التسلسلي لكل قطعة (واحد في كل سطر)' : 'الرقم التسلسلي لكل قطعة، واحد في كل سطر'}" aria-label="الأرقام التسلسلية، بند ${i + 1}">${list.join('\n')}</textarea>
+      <div class="serial-meta"><small class="c-sub ${list.length === want ? '' : 'neg'}" data-scount>الأرقام: ${list.length} من ${want}</small>${more.length ? html`<select class="inp" data-spick aria-label="إضافة رقم من المتوفر، بند ${i + 1}"><option value="">+ من المتوفر (${more.length})</option>${more.map((c) => html`<option value="${c}">${c}</option>`)}</select>` : ''}</div></div><small class="fld-e" data-err="serials${i}" hidden></small>`;
+  }
   function lotCell(l, i) {
     const p = store.findProduct(l.product);
     if (!stockMoves || !isLotTracked(p)) return '';
@@ -334,7 +346,7 @@ export function form(type, { root, params, query }) {
     const n = (k, v, ph = '', lab = '') => html`<input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="${k}" data-f="${k}${i}" value="${v ?? ''}" placeholder="${ph}" aria-label="${lab}، بند ${i + 1}">`;
     return html`<div class="line" data-i="${i}">
       <span class="c-idx">${i + 1}</span>
-      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً" aria-label="المنتج أو البيان، بند ${i + 1}">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small>${lotCell(l, i)}</div>
+      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً" aria-label="المنتج أو البيان، بند ${i + 1}">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small>${lotCell(l, i)}${serialCell(l, i)}</div>
       <div class="c-qty" data-label="الكمية">${n('qty', l.qty, '', 'الكمية')}${unitSelect(l)}</div>
       <div class="c-price" data-label="السعر">${n('price', l.price, '', 'السعر')}</div>
       <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0', 'الخصم %')}</div>
@@ -488,6 +500,16 @@ export function form(type, { root, params, query }) {
     dirty(); drawLines();
   }
 
+  // عدّاد الأرقام التسلسلية تحت البند: يحمرّ إن لم يساوِ الكمية
+  function countSerials(row, l) {
+    const c = $('[data-scount]', row);
+    if (!c) return;
+    const n = lineSerials(l).length;
+    const want = round(num(l.qty) * lineFactor(l), 6);
+    c.textContent = `الأرقام: ${n} من ${want}`;
+    c.classList.toggle('neg', n !== want);
+  }
+
   // ── ربط الأحداث ──
   combo($('[data-party]', root), {
     items: partyItems(C.kind),
@@ -511,6 +533,23 @@ export function form(type, { root, params, query }) {
     if (el.matches('[data-split]')) { split[el.dataset.split] = el.value; dirty(); drawPay(calc().total); if (hasInst) drawInst(calc().total); return; }
     if (el.dataset.ig) { instGen[el.dataset.ig] = el.value; return; }
     if (el.dataset.ik) { d.installments[Number(el.closest('[data-ir]').dataset.ir)][el.dataset.ik] = el.value; dirty(); updInstSum(); return; }
+    if (el.matches('[data-sk]')) {
+      const row = el.closest('.line[data-i]');
+      const l = d.lines[Number(row.dataset.i)];
+      l.serials = splitSerials(el.value);
+      // الكمية تتبع عدد الأرقام المكتوبة (للوحدة الأساسية)
+      if (l.serials.length && lineFactor(l) === 1 && num(l.qty) !== l.serials.length) {
+        l.qty = l.serials.length;
+        const q = $('[data-k="qty"]', row);
+        if (q) q.value = l.qty;
+        const hint = $('[data-hint]', row);
+        if (hint) hint.outerHTML = String(stockHint(l));
+        drawTotals();
+      }
+      countSerials(row, l);
+      dirty();
+      return;
+    }
     if (!k) return;
     const row = el.closest('.line[data-i]');
     if (row) {
@@ -518,8 +557,9 @@ export function form(type, { root, params, query }) {
       if (k === 'desc') return;
       d.lines[i][k] = el.value;
       dirty();
+      if (k === 'qty') countSerials(row, d.lines[i]);
       if (k === 'qty' && store.findProduct(d.lines[i].product)) {
-        const hint = $('.c-sub', row);
+        const hint = $('[data-hint]', row);
         if (hint) hint.outerHTML = String(stockHint(d.lines[i]));
       }
       drawTotals();
@@ -547,6 +587,14 @@ export function form(type, { root, params, query }) {
       if (d.discMode) $('[data-k="discVal"]', root).focus();
     }
     if (el.dataset.k === 'tax') { d.lines[Number(el.closest('.line').dataset.i)].tax = el.value; dirty(); drawTotals(); }
+    if (el.matches('[data-spick]') && el.value) {
+      const ta = $('[data-sk]', el.closest('.line'));
+      ta.value = splitSerials(ta.value).concat(el.value).join('\n');
+      el.querySelector(`option[value="${CSS.escape(el.value)}"]`)?.remove();
+      el.value = '';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (el.matches('[data-lpick]')) {
       const l = d.lines[Number(el.closest('.line').dataset.i)];
       const [lot, exp] = el.value ? el.value.split('|') : ['', ''];
@@ -643,6 +691,7 @@ export function form(type, { root, params, query }) {
         product: l.product || null, desc: String(l.desc || '').trim(), qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: showTax ? (l.tax || 'S') : 'S',
         ...(l.product && num(l.factor) > 1 ? { unit: l.unit, factor: num(l.factor) } : {}),
         ...(stockMoves && isLotTracked(store.findProduct(l.product)) && (String(l.lot || '').trim() || String(l.exp || '').trim()) ? { lot: String(l.lot || '').trim(), exp: String(l.exp || '').trim() } : {}),
+        ...(stockMoves && isSerialTracked(store.findProduct(l.product)) && lineSerials(l).length ? { serials: lineSerials(l) } : {}),
       })),
       vatRate: showTax ? num(d.vatRate) : 0,
       notes: String(d.notes || '').trim(),
@@ -685,6 +734,13 @@ export function form(type, { root, params, query }) {
     if (!Object.keys(errs).length && s.negativeStock !== 'block' && type === 'sale') {
       const gone = stockShortages(db, store.getBooks(), doc, existing).filter((x) => x.expired);
       if (gone.length && !(await confirmBox(`${gone.map((x) => `«${x.name}»: المتوفر الصالح ${x.have} فقط و${x.expired} منتهية الصلاحية لا تُباع`).join('، ')}. هل تريد المتابعة؟`, { ok: 'متابعة الحفظ', title: 'دفعات منتهية الصلاحية' }))) return;
+    }
+    // الأرقام التسلسلية: لا دخول لرقم موجود في المخزون، ولا خروج لرقم مباع أو خارج، ولا رقم مكرر. الرقم غير المسجَّل يتبع سياسة المخزون
+    if (!Object.keys(errs).length && stockMoves) {
+      const conf = serialConflicts(db, doc, existing);
+      for (const c of conf.filter((x) => x.kind !== 'unknown' || s.negativeStock === 'block')) errs['serials' + c.i] = errs['serials' + c.i] ? `${errs['serials' + c.i]}، ${c.msg}` : c.msg;
+      const unknown = conf.filter((x) => x.kind === 'unknown');
+      if (!Object.keys(errs).length && unknown.length && !(await confirmBox(`أرقام غير مسجَّلة في المخزون: ${unknown.map((x) => x.serial).slice(0, 6).join('، ')}${unknown.length > 6 ? ' وغيرها' : ''}. هل تريد المتابعة؟`, { ok: 'متابعة الحفظ', title: 'أرقام تسلسلية غير مسجَّلة' }))) return;
     }
     // حد دين العميل: تنبيه أو منع حسب الإعدادات، وفقط حين تزيد هذه الفاتورة دينه فيتجاوز حده
     if (!Object.keys(errs).length) {

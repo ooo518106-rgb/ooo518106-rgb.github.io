@@ -212,9 +212,9 @@ input.inp[type="search"], .pos-search .inp, .pos-cust .inp { background-image: u
 .tbl th { text-align: start; font-size: .76rem; font-weight: 600; color: var(--text-muted); background: var(--soft); padding: 11px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; letter-spacing: .02em; }
 .tbl td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .tbl tbody tr:last-child td { border-bottom: 0; }
-.tbl tbody tr[data-href] { cursor: pointer; }
+.tbl tbody tr[data-href], .tbl tbody tr[data-i].clickable { cursor: pointer; }
 .tbl tbody tr:hover td { background: var(--soft); }
-.tbl tbody tr[data-href]:hover td { background: var(--hover); }
+.tbl tbody tr[data-href]:hover td, .tbl tbody tr[data-i].clickable:hover td { background: var(--hover); }
 .tbl .num { text-align: end; white-space: nowrap; }
 .tbl th.num { text-align: end; }
 .tbl tfoot td { font-weight: 700; background: var(--soft); border-top: 2px solid var(--border); }
@@ -333,6 +333,12 @@ textarea.inp { min-height: 76px; resize: vertical; line-height: 1.6; }
 .lot-line .lot-n { width: 11rem; }
 .lot-line .lot-d { width: 9.5rem; }
 .a-lot { grid-column: 1 / -1; }
+/* الأرقام التسلسلية: مربع الأرقام تحت بند الفاتورة أو التسوية مع عدّاد واختيار من المتوفر */
+.serial-line { margin-top: 6px; }
+.serial-line textarea.inp { min-height: 56px; padding: 6px 9px; font-size: .85rem; resize: vertical; }
+.serial-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-top: 4px; }
+.serial-meta .c-sub { margin-top: 0; }
+.serial-meta .inp { width: auto; max-width: 100%; min-height: 32px; padding: 3px 8px; font-size: .82rem; }
 @media (max-width: 560px) { .lot-row { grid-template-columns: 1fr 1fr 36px; } .lot-row.line-h { display: none; } .lot-row [data-olk="lot"] { grid-column: 1 / -1; } .lot-line .lot-n, .lot-line .lot-d, .lot-line select.inp { flex: 1 1 8rem; width: auto; } }
 
 /* مسير الرواتب والتحويلات المخزنية */

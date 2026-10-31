@@ -24,7 +24,7 @@ const SEG_PERM = {
   journal: 'buy', daybook: 'buy', adjustments: 'buy', 'sales-orders': 'sell', 'purchase-orders': 'buy',
   assets: 'buy', cheques: 'buy', recurring: 'buy', audit: 'reports',
   employees: 'buy', payroll: 'buy', 'stock-transfers': 'buy', reconcile: 'buy',
-  products: 'products', labels: 'products', import: 'products', lots: 'products',
+  products: 'products', labels: 'products', import: 'products', lots: 'products', serials: 'sell',
   accounts: 'reports', reports: 'reports', collections: 'reports', today: 'reports', '': 'reports',
   settings: 'settings', users: 'admin', subscription: 'admin', activate: 'admin', welcome: null,
 };
