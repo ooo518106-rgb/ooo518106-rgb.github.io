@@ -239,7 +239,7 @@ export function printHTML(content, { size = 'a4', title, page: pageCss } = {}) {
   const page = document.getElementById('print-page');
   area.innerHTML = String(content);
   area.className = 'print-' + size;
-  page.textContent = pageCss || (size === 'receipt' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4; margin: 10mm; }');
+  page.textContent = pageCss || (size === 'receipt58' ? '@page { size: 58mm auto; margin: 2mm; }' : size === 'receipt' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4; margin: 10mm; }');
   document.body.classList.add('printing');
   const old = document.title;
   if (title) document.title = title;

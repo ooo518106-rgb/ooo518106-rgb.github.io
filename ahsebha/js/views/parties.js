@@ -72,6 +72,7 @@ export function form(kind, { root, params }) {
   const existing = params.id ? store.findParty(params.id) : null;
   if (params.id && (!existing || existing.kind !== kind)) { root.innerHTML = String(empty('🔎', `${W.one} غير موجود`)); return; }
   const p = existing ? { ...existing } : { kind, name: '', phone: '', email: '', vatNo: '', crNo: '', address: '', notes: '', opening: 0 };
+  if (!num(p.creditLimit)) p.creditLimit = '';
   const title = existing ? `تعديل: ${existing.name}` : `${W.one} جديد`;
   setTitle(title);
   const f = (label, k, attrs = '', opts = {}) => field(label, html`<input class="inp" data-k="${k}" data-f="${k}" ${raw(attrs)} value="${p[k] ?? ''}">`, opts);
@@ -86,6 +87,7 @@ export function form(kind, { root, params }) {
       ${f('السجل التجاري', 'crNo', 'dir="ltr"')}
       <div class="span2">${f('العنوان', 'address')}</div>
       <div>${f(kind === 'customer' ? 'الرصيد الافتتاحي (عليه لكم)' : 'الرصيد الافتتاحي (له عليكم)', 'opening', 'type="text" inputmode="decimal" data-num autocomplete="off"', { hint: `الرصيد في ${s.startDate ? fmtDate(s.startDate) : 'تاريخ بداية التشغيل'}. اكتبه بالسالب إذا كان العكس.` })}</div>
+      ${kind === 'customer' ? html`<div>${f('حد الدين', 'creditLimit', 'type="text" inputmode="decimal" data-num autocomplete="off"', { hint: 'أقصى مبلغ آجل لهذا العميل. اتركه فارغاً لعدم وضع حد. يُنبَّه أو يُمنع عند تجاوزه حسب الإعدادات' })}</div>` : ''}
       <div class="span-all">${field('ملاحظات', html`<textarea class="inp" data-k="notes" rows="2">${p.notes || ''}</textarea>`)}</div>
     </div></div>
     <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ</button></div></form>`);
@@ -101,6 +103,8 @@ export function form(kind, { root, params }) {
     if (p.vatNo && s.country === 'SA' && !validSaudiVat(p.vatNo)) errs.vatNo = 'الرقم الضريبي السعودي 15 رقماً يبدأ وينتهي بالرقم 3';
     if (!showErrors(root, errs)) return;
     p.opening = num(p.opening);
+    // الصفر يعني «بلا حد»، ويُكتب صراحة لأن الحفظ يدمج مع المحفوظ فلا يزول الحذف وحده
+    if (kind === 'customer') p.creditLimit = num(p.creditLimit) > 0 ? num(p.creditLimit) : 0; else delete p.creditLimit;
     for (const k of ['nameEn', 'phone', 'email', 'crNo', 'address', 'notes']) p[k] = String(p[k] || '').trim();
     const saved = store.saveParty(p);
     guard.dirty = false;
@@ -137,7 +141,7 @@ export function show(kind, { root, params, query, path }) {
         <button class="btn btn-text-danger" data-del>🗑️ حذف</button>`,
     })}
     <div class="grid g4" style="margin-bottom:14px">
-      <div class="kpi"><span class="kpi-l">الرصيد الحالي</span><span class="kpi-v ${bal > 0 ? '' : 'pos'}">${money(bal, { sym: true })}</span><span class="kpi-s">${bal > 0 ? W.balance : bal < 0 ? 'رصيد دائن لصالح ' + (kind === 'customer' ? 'العميل' : 'كم') : 'لا يوجد رصيد'}</span></div>
+      <div class="kpi"><span class="kpi-l">الرصيد الحالي</span><span class="kpi-v ${bal > 0 ? '' : 'pos'}">${money(bal, { sym: true })}</span><span class="kpi-s">${bal > 0 ? W.balance : bal < 0 ? 'رصيد دائن لصالح ' + (kind === 'customer' ? 'العميل' : 'كم') : 'لا يوجد رصيد'}${kind === 'customer' && num(p.creditLimit) > 0 ? html` · حد الدين ${money(p.creditLimit, { sym: true })}${bal > num(p.creditLimit) ? html` <b class="neg">(متجاوز)</b>` : ''}` : ''}</span></div>
       <div class="kpi"><span class="kpi-l">متأخر السداد</span><span class="kpi-v ${late > 0 ? 'neg' : ''}">${money(late, { sym: true })}</span></div>
       <div class="kpi"><span class="kpi-l">${kind === 'customer' ? 'مبيعات' : 'مشتريات'} هذه السنة</span><span class="kpi-v">${money(volume, { sym: true })}</span></div>
       <div class="kpi"><span class="kpi-l">عدد المستندات</span><span class="kpi-v">${docs.length}</span></div>

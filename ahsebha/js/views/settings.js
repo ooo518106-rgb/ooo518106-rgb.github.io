@@ -49,7 +49,7 @@ export function view({ root }) {
       <div class="card"><div class="card-h"><h3>🖨️ الفواتير والطباعة</h3></div>
         <div class="form-grid">
           ${field('بادئة رقم فاتورة المبيعات', inp('salePrefix', 'dir="ltr"'), { hint: 'مثال: INV- فتظهر INV-0001' })}
-          ${field('حجم الطباعة', html`<select class="inp" name="printSize">${opt('a4', s.printSize, 'ورقة A4')}${opt('receipt', s.printSize, 'إيصال حراري 80 مم (للمبيعات)')}</select>`)}
+          ${field('حجم الطباعة', html`<select class="inp" name="printSize">${opt('a4', s.printSize, 'ورقة A4')}${opt('receipt', s.printSize, 'إيصال حراري 80 مم (للمبيعات)')}${opt('receipt58', s.printSize, 'إيصال حراري 58 مم (للمبيعات)')}</select>`)}
           ${field('لغة الفاتورة', html`<select class="inp" name="invoiceLang">${opt('ar', s.invoiceLang || 'ar', 'عربي')}${opt('bi', s.invoiceLang, 'عربي وإنجليزي (ثنائية اللغة)')}</select>`, { hint: 'الثنائية تُظهر العناوين وأسماء المنتجات بالإنجليزي أيضاً' })}
           <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" name="showHijri" ${s.showHijri ? raw('checked') : ''}> إظهار التاريخ الهجري</label>
           <div class="span-all">${field('ملاحظة أسفل الفاتورة', html`<textarea class="inp" name="invoiceNote" rows="2" placeholder="مثال: الاستبدال خلال 7 أيام، أو بيانات الحساب البنكي للتحويل">${s.invoiceNote || ''}</textarea>`)}</div>
@@ -58,6 +58,7 @@ export function view({ root }) {
       <div class="card"><div class="card-h"><h3>🛡️ ضبط الفواتير والمخزون</h3></div>
         <div class="form-grid">
           ${field('البيع بأكثر من المخزون', html`<select class="inp" name="negativeStock">${opt('warn', s.negativeStock || 'warn', 'تنبيه فقط (يُسمح بالبيع)')}${opt('block', s.negativeStock, 'منع البيع وإظهار المتوفر')}</select>`, { hint: 'يسري على الفواتير والكاشير ومرتجع المشتريات' })}
+          ${field('تجاوز حد دين العميل', html`<select class="inp" name="creditPolicy">${opt('warn', s.creditPolicy || 'warn', 'تنبيه قبل الحفظ (يمكن المتابعة)')}${opt('block', s.creditPolicy, 'منع البيع الآجل الذي يتجاوز الحد')}</select>`, { hint: 'الحد يُكتب في بطاقة كل عميل، ويسري على الفواتير والكاشير' })}
           <label class="check" style="align-self:end;min-height:40px"><input type="checkbox" name="allowDeleteInvoices" ${s.allowDeleteInvoices ? raw('checked') : ''}> السماح بحذف فواتير المبيعات ومرتجعاتها</label>
           <p class="muted small span-all">الفاتورة الصادرة لا تُحذف عادةً: تُلغى من صفحتها بإشعار دائن فتبقى برقمها في السجل، وتنعكس المبيعات والضريبة والمخزون. فعّل الحذف فقط إن كنت تحتاجه، وأرقام المحذوف لا تُعاد على أي حال.</p>
         </div></div>
@@ -178,7 +179,7 @@ export function view({ root }) {
       taxLabel: (v.taxLabel || '').trim() || 'الضريبة', inclusive: form.inclusive.checked,
       salePrefix: (v.salePrefix ?? 'INV-').trim(), printSize: v.printSize, showHijri: form.showHijri.checked, invoiceNote: (v.invoiceNote || '').trim(),
       startDate: isDate(v.startDate) ? v.startDate : s.startDate, fiscalStartMonth: Number(v.fiscalStartMonth) || 1,
-      negativeStock: v.negativeStock === 'block' ? 'block' : 'warn', allowDeleteInvoices: form.allowDeleteInvoices.checked,
+      negativeStock: v.negativeStock === 'block' ? 'block' : 'warn', creditPolicy: v.creditPolicy === 'block' ? 'block' : 'warn', allowDeleteInvoices: form.allowDeleteInvoices.checked,
     });
     guard.dirty = false;
     window.dispatchEvent(new Event('acc:shell'));
