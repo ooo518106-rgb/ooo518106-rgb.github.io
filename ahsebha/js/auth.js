@@ -36,7 +36,7 @@ export function routePerm(path) {
 }
 
 let current = null;
-const SESSION = 'ahsebha-session';
+const SESSION = 'ahsebha-session' + (store.companyId === 'main' ? '' : '@' + store.companyId); // دخول المستخدم لكل شركة وحدها
 const ITER = 150000;
 
 export const usersEnabled = () => !!(store.getDb() && store.getDb().users.length);

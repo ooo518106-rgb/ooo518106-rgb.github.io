@@ -8,7 +8,7 @@ import { can, usersEnabled } from '../auth.js';
 import { docGate, demoError, has as hasFeature } from '../license.js';
 import { handleDemoError } from './subscription.js';
 
-const HELD_KEY = 'ahsebha-pos-held';
+const HELD_KEY = 'ahsebha-pos-held' + (store.companyId === 'main' ? '' : '@' + store.companyId); // الفواتير المعلّقة لكل شركة وحدها
 const newCart = () => ({ lines: [], party: null });
 let cart = newCart();
 
