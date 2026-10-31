@@ -1,5 +1,7 @@
 // ═══ التقارير: القوائم المالية، الضريبة، المبيعات، الديون، النقدية، المخزون ═══
 import * as store from '../store.js';
+import { cashFlowStatement, CASH_FLOW_LABELS } from '../cashflow.js';
+import { can } from '../auth.js';
 import {
   trialBalance, incomeStatement, balanceSheet, vatReport, aging, AGING_BUCKETS, salesAnalysis, cashReport, stockReport,
   docNo, DOC_TYPES, num, round, zakatEstimate, ZAKAT_RATE, fiscalYearStart, addMonths, addDays,
@@ -12,6 +14,7 @@ export const REPORTS = [
   { sec: 'القوائم المالية' },
   { id: 'income', icon: '📈', t: 'قائمة الدخل', d: 'الإيرادات والتكاليف والمصروفات وصافي الربح' },
   { id: 'balance', icon: '⚖️', t: 'الميزانية العمومية', d: 'الأصول والخصوم وحقوق الملكية في تاريخ معين' },
+  { id: 'cashflow', icon: '💰', t: 'قائمة التدفقات النقدية', d: 'التشغيل والاستثمار والتمويل ومطابقة رصيد النقدية' },
   { id: 'trial', icon: '🧮', t: 'ميزان المراجعة', d: 'أرصدة وحركات كل الحسابات والتحقق من التوازن' },
   { sec: 'الضريبة' },
   { id: 'vat', icon: '🧾', t: 'إقرار الضريبة', d: 'ضريبة المبيعات والمشتريات وصافي المستحق للفترة' },
@@ -43,7 +46,7 @@ export function report(ctx) {
   const r = REPORTS.find((x) => x.id === ctx.params.name);
   if (!r) { setTitle('التقارير'); ctx.root.innerHTML = String(empty('🔎', 'التقرير غير موجود', '', html`<a class="btn btn-ghost" href="#/reports">كل التقارير</a>`)); return; }
   setTitle(r.t);
-  const fn = { income, balance, trial, vat, zakat, sales, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
+  const fn = { income, balance, trial, vat, zakat, sales, cashflow, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
   fn(ctx, r);
 }
 
@@ -253,6 +256,30 @@ function cash(ctx, r) {
   frame(ctx, r, { per, body, note: 'اضغط على أي حساب لعرض تفاصيل حركته. التحويلات بين الصندوق والبنك تظهر داخلاً في حساب وخارجاً من الآخر.' });
 }
 
+function cashflow(ctx, r) {
+  const per = periodOf(ctx.query, 'month');
+  const C = cashFlowStatement(store.getDb(), store.getBooks(), per);
+  const body = html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>النشاط</th><th class="num">المقبوضات</th><th class="num">المدفوعات</th><th class="num">صافي التدفق</th></tr></thead><tbody>
+    <tr class="strong"><td>النقد أول الفترة</td><td></td><td></td><td class="num">${money(C.opening)}</td></tr>
+    ${C.sections.map((s) => html`<tr><td>${s.name}</td><td class="num">${money(s.received)}</td><td class="num">${money(s.paid)}</td><td class="num">${money(s.net)}</td></tr>`)}
+    <tr class="strong"><td>صافي التغير في النقدية</td><td></td><td></td><td class="num">${money(C.net)}</td></tr>
+    <tr class="strong"><td>النقد آخر الفترة</td><td></td><td></td><td class="num">${money(C.closing)}</td></tr>
+    <tr><td>فرق المطابقة</td><td></td><td></td><td class="num ${C.reconciliation ? 'neg' : 'pos'}">${money(C.reconciliation)}</td></tr>
+    </tbody></table></div>
+    <h3 style="margin-top:20px">تفاصيل الحركات وتصنيفها</h3>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>التاريخ</th><th>المستند</th><th class="num">صافي الحركة</th><th>التصنيف</th></tr></thead><tbody>
+    ${C.movements.map((m) => html`<tr><td>${fmtDate(m.date)}</td><td><a href="${docHref(m.doc)}">${docNo(m.doc, S())}</a></td><td class="num">${money(m.amount)}</td><td>${can('settings') ? html`<select class="inp" aria-label="تصنيف حركة النقدية" data-cashflow="${m.doc.id}"><option value="">تلقائي</option>${Object.entries(CASH_FLOW_LABELS).map(([id, label]) => html`<option value="${id}" ${m.overridden && m.category === id ? raw('selected') : ''}>${label}</option>`)}</select><small class="muted">${CASH_FLOW_LABELS[m.category]}</small>` : CASH_FLOW_LABELS[m.category]}</td></tr>`)}
+    </tbody></table></div>`;
+  frame(ctx, r, { per, body, note: 'تُستبعد التحويلات الداخلية والحركات غير النقدية، ويُعرض صافي النقد لكل قيد. راجع تصنيف الحركات، خصوصاً تسديد الموردين عند شراء أصول. التصنيف اليدوي يخص التقرير فقط ويحفظ لكل منشأة؛ لا يغيّر القيود. الأرصدة الافتتاحية لا تعتبر تدفقاً نقدياً.' });
+  for (const sel of ctx.root.querySelectorAll('[data-cashflow]')) sel.onchange = () => {
+    if (!can('settings')) return;
+    const map = { ...(S().cashFlowCategories || {}) };
+    if (sel.value) map[sel.dataset.cashflow] = sel.value; else delete map[sel.dataset.cashflow];
+    store.saveSettings({ cashFlowCategories: map });
+    cashflow(ctx, r);
+  };
+}
+
 // ── المخزون ──
 function stock(ctx, r) {
   const db = store.getDb();
@@ -286,3 +313,4 @@ function expenses(ctx, r) {
     : empty('💸', 'لا توجد مصروفات في هذه الفترة');
   frame(ctx, r, { per, body, note: `لا تشمل تكلفة البضاعة المباعة (${money(I.totalCogs)}). النسبة من إجمالي المصروفات التشغيلية.` });
 }
+
