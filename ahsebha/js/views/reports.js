@@ -1,7 +1,7 @@
 // ═══ التقارير: القوائم المالية، الضريبة، المبيعات، الديون، النقدية، المخزون ═══
 import * as store from '../store.js';
 import {
-  trialBalance, incomeStatement, balanceSheet, vatReport, aging, AGING_BUCKETS, salesAnalysis, cashReport, stockReport,
+  trialBalance, incomeStatement, balanceSheet, vatReport, aging, AGING_BUCKETS, salesAnalysis, cashReport, cashFlowStatement, stockReport,
   docNo, DOC_TYPES, num, round, zakatEstimate, ZAKAT_RATE, fiscalYearStart, addMonths, addDays,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, empty, $, exportTable, attr } from '../ui.js';
@@ -12,6 +12,7 @@ export const REPORTS = [
   { sec: 'القوائم المالية' },
   { id: 'income', icon: '📈', t: 'قائمة الدخل', d: 'الإيرادات والتكاليف والمصروفات وصافي الربح' },
   { id: 'balance', icon: '⚖️', t: 'الميزانية العمومية', d: 'الأصول والخصوم وحقوق الملكية في تاريخ معين' },
+  { id: 'cashflow', icon: '💧', t: 'قائمة التدفقات النقدية', d: 'النقد الداخل والخارج من التشغيل والاستثمار والتمويل' },
   { id: 'trial', icon: '🧮', t: 'ميزان المراجعة', d: 'أرصدة وحركات كل الحسابات والتحقق من التوازن' },
   { sec: 'الضريبة' },
   { id: 'vat', icon: '🧾', t: 'إقرار الضريبة', d: 'ضريبة المبيعات والمشتريات وصافي المستحق للفترة' },
@@ -43,7 +44,7 @@ export function report(ctx) {
   const r = REPORTS.find((x) => x.id === ctx.params.name);
   if (!r) { setTitle('التقارير'); ctx.root.innerHTML = String(empty('🔎', 'التقرير غير موجود', '', html`<a class="btn btn-ghost" href="#/reports">كل التقارير</a>`)); return; }
   setTitle(r.t);
-  const fn = { income, balance, trial, vat, zakat, sales, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
+  const fn = { income, balance, trial, vat, zakat, sales, cashflow, 'aging-ar': (c) => agingView(c, 'customer'), 'aging-ap': (c) => agingView(c, 'supplier'), cash, stock, expenses }[r.id];
   fn(ctx, r);
 }
 
@@ -251,6 +252,30 @@ function cash(ctx, r) {
     ${C.rows.map((x) => html`<tr data-href="${withQuery('accounts/' + x.account.id, { from: per.from, to: per.to })}"><td>${x.account.name}</td><td class="num">${money(x.open)}</td><td class="num pos">${money(x.in)}</td><td class="num neg">${money(x.out)}</td><td class="num"><b>${money(x.close)}</b></td></tr>`)}
   </tbody><tfoot><tr><td>الإجمالي</td><td class="num">${money(C.totals.open)}</td><td class="num">${money(C.totals.in)}</td><td class="num">${money(C.totals.out)}</td><td class="num">${money(C.totals.close)}</td></tr></tfoot></table></div>`;
   frame(ctx, r, { per, body, note: 'اضغط على أي حساب لعرض تفاصيل حركته. التحويلات بين الصندوق والبنك تظهر داخلاً في حساب وخارجاً من الآخر.' });
+}
+
+// ── قائمة التدفقات النقدية ──
+function cashflow(ctx, r) {
+  const per = periodOf(ctx.query, 'month');
+  const C = cashFlowStatement(store.getDb(), store.getBooks(), per);
+  const labels = {
+    operating: 'الأنشطة التشغيلية',
+    investing: 'الأنشطة الاستثمارية',
+    financing: 'الأنشطة التمويلية',
+    other: 'أنشطة أخرى / غير مصنفة',
+  };
+  const keys = ['operating', 'investing', 'financing', 'other'];
+  const rows = keys.map((key) => ({ key, ...C.flows[key] }));
+  const body = html`<div class="grid g3" style="margin-bottom:14px">
+      <div class="kpi"><span class="kpi-l">النقد أول الفترة</span><span class="kpi-v">${money(C.opening, { sym: true })}</span></div>
+      <div class="kpi"><span class="kpi-l">صافي التدفق خلال الفترة</span><span class="kpi-v ${C.net >= 0 ? 'pos' : 'neg'}">${money(C.net, { sym: true })}</span></div>
+      <div class="kpi"><span class="kpi-l">النقد آخر الفترة</span><span class="kpi-v">${money(C.closing, { sym: true })}</span></div>
+    </div>
+    <div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>النشاط</th><th class="num">المقبوضات</th><th class="num">المدفوعات</th><th class="num">صافي التدفق</th></tr></thead><tbody>
+      ${rows.map((x) => html`<tr><td>${labels[x.key]}</td><td class="num pos">${money(x.in)}</td><td class="num neg">${money(x.out)}</td><td class="num"><b>${money(x.net)}</b></td></tr>`)}
+    </tbody><tfoot><tr><td>الإجمالي</td><td class="num">${money(rows.reduce((s, x) => s + x.in, 0))}</td><td class="num">${money(rows.reduce((s, x) => s + x.out, 0))}</td><td class="num">${money(C.net)}</td></tr></tfoot></table></div>
+    <div class="sum-bar" style="margin-top:10px"><span>فرق المطابقة مع رصيد النقدية</span><b class="${C.reconciliation ? 'neg' : 'pos'}">${money(C.reconciliation, { sym: true })}</b></div>`;
+  frame(ctx, r, { per, body, note: 'قائمة مباشرة تقديرية تُصنّف المقبوضات والمدفوعات بحسب الحساب المقابل في القيد. التحويلات بين الصندوق والبنوك مستبعدة لأنها لا تغيّر نقد المنشأة. راجع التصنيف وفرق المطابقة قبل الاعتماد المحاسبي.' });
 }
 
 // ── المخزون ──
