@@ -248,7 +248,7 @@ async function issueDialog(c) {
       ${curEnt ? html`<p class="note note-info">اشتراكه الحالي: <b>${planName(cur.payload.p)}</b> — ${curEnt.status === 'lifetime' ? 'دائم' : curEnt.status === 'expired' ? 'منتهي منذ ' + fmtDate(curEnt.exp) : (curEnt.status === 'grace' ? 'في المهلة، انتهى ' : 'ينتهي ') + fmtDate(curEnt.exp)}</p>` : ''}
       <div class="form-grid">
         ${field('الباقة', html`<select class="inp" name="plan">${plans.map((p) => html`<option value="${p.id}" ${p.id === firstPlan ? raw('selected') : ''}>${p.name}</option>`)}<option value="custom" ${firstPlan === 'custom' ? raw('selected') : ''}>مخصّصة (أختار الميزات)</option></select>`)}
-        ${field('كود الجهاز (اختياري)', html`<input class="inp" name="device" dir="ltr" placeholder="مثال: K7M2-9QX4" maxlength="20" autocomplete="off">`, { hint: 'اتركه فارغاً ليعمل الكود على أي جهاز' })}
+        ${field('كود الجهاز (اختياري)', html`<input class="inp" name="device" dir="ltr" placeholder="مثال: K7M2-9QX4" maxlength="20" autocomplete="off">`, { hint: 'اتركه فارغاً ليعمل الكود على أي جهاز. وإذا كتبت كود جهاز الزبون (يظهر له في شاشة التفعيل) يعمل الكود على جهازه فقط، فلا ينفع نسخه لغيره.' })}
       </div>
       <div><div class="fld-l" style="margin-bottom:6px">الميزات <span class="muted small" data-count></span></div>${featureBoxes(initial)}</div>
       <div><div class="fld-l" style="margin-bottom:6px">المدة</div>

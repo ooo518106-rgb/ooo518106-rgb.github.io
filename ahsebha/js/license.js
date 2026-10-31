@@ -249,6 +249,17 @@ export function demoError(d) {
   return e;
 }
 
+// ─── قفل البرنامج كله بكود المالك ───
+// يعمل حين يفعّله المالك (CONFIG.requireCode) ويكون مفتاحه العام موجوداً: بلا المفتاح لا يُقبل أي كود فلا نقفل الجميع.
+// يُفتح بكود صالح على هذا الجهاز: ساري أو دائم أو في مهلة ما بعد الانتهاء (وكود العرض كود صالح). الغائب والمنتهي يُغلقان.
+const GATE_OPEN = new Set(['active', 'lifetime', 'grace']);
+export const gateOn = (keys = PUBLIC_KEYS) => !!CONFIG.requireCode && keys.length > 0;
+export const gateOpen = (keys = PUBLIC_KEYS) => !gateOn(keys) || (!!current && GATE_OPEN.has(entitlement().status));
+// سبب الإغلاق لشاشة القفل: none = لا كود، bad = كود محفوظ لا يعمل (storedProblem)، expired = كود انتهت صلاحيته
+export const gateWhy = () => (lastError ? 'bad' : current ? 'expired' : 'none');
+// الانتهاء يهمّ الزبون إذا كانت الميزات تُقفل بالاشتراك أو كان البرنامج كله مقفلاً بالكود
+export const tracksExpiry = () => enforcing() || gateOn();
+
 // في أثناء تجربة النسخة المفتوحة للجميع تُفتح كل الميزات لتجربتها، وبعد انتهائها تعود حسب الباقة
 const trialOpen = () => { const d = demo(); return !!d && d.source === 'trial' && !d.blocked; };
 export const has = (id) => !enforcing() || entitlement().features.has(id) || trialOpen();

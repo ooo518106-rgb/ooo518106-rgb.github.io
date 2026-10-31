@@ -785,6 +785,23 @@ dialog.sheet::backdrop { background: rgba(15, 23, 42, .5); }
 .feat-ic .i { width: 20px; height: 20px; vertical-align: 0; }
 .dev-code { padding: 8px 14px; border-radius: 10px; background: var(--soft); border: 1px solid var(--border); font-weight: 700; letter-spacing: .08em; font-size: 1rem; user-select: all; }
 
+/* ─── شاشة القفل بكود المالك: تغطي البرنامج كله حتى يُقبل كود صالح ─── */
+.gate { position: fixed; inset: 0; z-index: 3000; overflow: auto; display: flex; padding: 20px 16px; background: var(--bg) radial-gradient(60% 50% at 50% 0%, var(--primary-soft), transparent 70%) no-repeat; }
+.gate-card { margin: auto; width: 100%; max-width: 460px; padding: 28px 24px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); text-align: center; }
+.gate-brand { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 1.4rem; font-weight: 800; }
+.gate-brand .brand-badge { width: 56px; height: 56px; border-radius: 16px; }
+.gate-brand .brand-logo { border-radius: 16px; }
+.gate-card h1 { font-size: 1.35rem; font-weight: 800; margin-bottom: 8px; }
+.gate-text { color: var(--text-muted); margin-bottom: 4px; }
+.gate .note { margin-top: 14px; text-align: start; }
+.gate form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; text-align: start; }
+.gate-go { width: 100%; min-height: 46px; font-size: 1rem; }
+.gate-ask { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.gate-dev { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gate-safe { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.gate-safe .btn { margin-top: 10px; }
+@media (max-width: 480px) { .gate { padding: 12px; } .gate-card { padding: 22px 16px; } }
+
 /* ─── صفحات مستقلة: لوحة المالك وصفحة الأسعار ─── */
 .site-page { line-height: 1.55; }
 .site-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px; background: var(--bg); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
