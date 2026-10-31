@@ -2,7 +2,7 @@
 // بلا DOM وبلا إنترنت: كل شيء يُحسب على الجهاز من نفس الدفاتر، فالأرقام دائماً مطابقة للتقارير.
 import {
   incomeStatement, salesAnalysis, stockReport, moneyAccounts, paymentList, currencyInfo, isPdc,
-  addDays, daysBetween, monthStart, ymd, round, num, dashboard,
+  addDays, daysBetween, monthStart, ymd, round, num, dashboard, lotReport,
 } from './core.js';
 
 // ─── الفترات ───
@@ -115,9 +115,16 @@ export function summaryFacts(db, B, { preset = 'today', today = ymd() } = {}) {
   const cheques = (db.docs || []).filter((d) => isPdc(d) && !d.cleared && !d.bounced && d.chequeDue && d.chequeDue <= addDays(today, 7))
     .sort((a, b) => a.chequeDue.localeCompare(b.chequeDue))
     .map((d) => ({ incoming: d.type === 'receipt', amount: R(num(d.amount)), party: (db.parties || []).find((p) => p.id === d.party)?.name || '', days: daysBetween(today, d.chequeDue) }));
+  // الدفعات المنتهية أو القريبة من الانتهاء (للمنتجات المتتبَّعة بالدفعات فقط)
+  const ea = db.settings?.expiryAlertDays;
+  const lr = lotReport(db, B, { today, alertDays: ea == null || ea === '' ? 30 : Math.max(0, Math.floor(num(ea))) });
+  const lots = {
+    expired: lr.expired.count, soon: lr.soon.count, days: lr.alertDays,
+    top: lr.rows.filter((r) => (r.state === 'expired' || r.state === 'soon') && r.qty > 0).slice(0, 2).map((r) => ({ name: r.product.name, lot: r.lot, state: r.state, days: r.days })),
+  };
   const since = db.settings?.lastBackupAt ? Math.floor((Date.parse(today + 'T12:00:00') - Date.parse(db.settings.lastBackupAt)) / 864e5) : null;
   const attention = {
-    overdue, low, cheques,
+    overdue, low, cheques, lots,
     vat: db.settings?.vat && D.vatDue > 0 ? D.vatDue : 0,
     issues: (B.issues || []).length,
     backupDays: (db.docs || []).length > 0 && (since == null || since >= 7) ? (since == null ? -1 : since) : null,
@@ -255,6 +262,11 @@ export function narrate(f, mode = 'text') {
     const more = A.low.length > 3 ? ` و${A.low.length - 3} غيرها` : '';
     warn.push({ text: `بضاعة قاربت تخلص: ${list(some)}${more}.`, href: '#/reports/stock', go: 'افتح المخزون' });
   }
+  if (A.lots && A.lots.expired) {
+    const some = A.lots.top.filter((x) => x.state === 'expired').map((x) => x.name + (x.lot ? ` (دفعة ${x.lot})` : ''));
+    warn.push({ text: `${countAr(A.lots.expired, ['دفعة منتهية الصلاحية', 'دفعتان منتهيتا الصلاحية', 'دفعات منتهية الصلاحية', 'دفعة منتهية الصلاحية'])}${some.length ? `: ${list(some)}` : ''}. لا تُباع، والأفضل إتلافها.`, href: '#/lots?f=expired', go: 'افتح الدفعات' });
+  }
+  if (A.lots && A.lots.soon) warn.push({ text: `${countAr(A.lots.soon, ['دفعة تنتهي صلاحيتها', 'دفعتان تنتهي صلاحيتهما', 'دفعات تنتهي صلاحيتها', 'دفعة تنتهي صلاحيتها'])} خلال ${countAr(A.lots.days, DAYS)}.`, href: '#/lots?f=soon', go: 'افتح الدفعات' });
   for (const c of A.cheques.slice(0, 2)) {
     const when = c.days < 0 ? `مرّ موعده من ${countAr(-c.days, DAYS)}` : c.days === 0 ? 'يستحق اليوم' : `يستحق بعد ${countAr(c.days, DAYS)}`;
     warn.push({ text: `شيك ${c.incoming ? 'وارد' : 'صادر'} بقيمة ${m(c.amount)}${c.party ? ` ${c.incoming ? 'من' : 'إلى'} ${c.party}` : ''} ${when}.`, href: '#/cheques', go: 'افتح الشيكات' });
@@ -270,7 +282,7 @@ export function narrate(f, mode = 'text') {
 // الجملة الأولى للبطاقة المختصرة على الصفحة الرئيسية
 export function headline(f) {
   const s = narrate(f, 'text');
-  return { sales: s.find((x) => x.id === 'sales')?.text || '', warnings: f.attention.overdue.count + f.attention.low.length + f.attention.cheques.length };
+  return { sales: s.find((x) => x.id === 'sales')?.text || '', warnings: f.attention.overdue.count + f.attention.low.length + f.attention.cheques.length + (f.attention.lots ? f.attention.lots.expired + f.attention.lots.soon : 0) };
 }
 
 // نص السماع كاملاً بجمل قصيرة (المتصفح يقطع الجمل الطويلة جداً)

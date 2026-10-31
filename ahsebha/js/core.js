@@ -49,6 +49,8 @@ export function defaultSettings(o = {}) {
     allowDeleteInvoices: false, negativeStock: 'warn',
     // تجاوز حد دين العميل بفاتورة آجلة: تنبيه قبل الحفظ (warn) أو منع (block)
     creditPolicy: 'warn',
+    // الدفعات التي تنتهي صلاحيتها خلال هذا العدد من الأيام تظهر تنبيهاً في الرئيسية وصفحة الدفعات
+    expiryAlertDays: 30,
     lastBackupAt: null,
     ...o,
   };
@@ -485,6 +487,23 @@ export function assetAccum(a, sched, asOf) {
   return accum;
 }
 
+// ═══ تتبّع الدفعات وتواريخ الصلاحية ═══
+// طبقة فوق المخزون لا تغيّر القيود ولا التكلفة المتوسطة: المنتج الذي فُعّل تتبعه (product.track === 'lot') تُسجَّل كمياته
+// حسب الدفعة والمستودع. الوارد يحمل دفعته (line.lot رقمها، line.exp تاريخ انتهائها)، والصادر يسحب الأقرب انتهاءً أولاً (FEFO)
+// إلا إن حدّد البند دفعة بعينها. المنتهي الصلاحية لا يُباع ولا يُحوَّل تلقائياً. الرصيد بلا دفعة (ما قبل تفعيل التتبع) يُسحب أولاً.
+export const isLotTracked = (p) => !!p && p.type === 'stock' && p.track === 'lot';
+export const lotExpired = (r, date) => !!r.exp && r.exp < date;
+const lotKey = (wh, lot, exp) => `${wh}|${lot}|${exp}`;
+const cleanLot = (v) => String(v == null ? '' : v).trim().slice(0, 60);
+const cleanExp = (v) => (isDate(v) ? String(v) : '');
+// ترتيب السحب: بلا دفعة أولاً، ثم الأقرب انتهاءً، وما بلا تاريخ انتهاء آخراً، وعند التساوي الأقدم دخولاً
+const fefoOrder = (a, b) => {
+  const ua = !a.lot && !a.exp, ub = !b.lot && !b.exp;
+  if (ua !== ub) return ua ? -1 : 1;
+  const ea = a.exp || '9999-12-31', eb = b.exp || '9999-12-31';
+  return ea < eb ? -1 : ea > eb ? 1 : a.seq - b.seq;
+};
+
 // ═══ بناء الدفاتر: القيود، المخزون، أرصدة العملاء والموردين ═══
 export function buildBooks(db, opts = {}) {
   const today = opts.today || ymd(new Date());
@@ -518,6 +537,125 @@ export function buildBooks(db, opts = {}) {
   };
   const whOf = (d) => d.wh || MAIN_WH;
 
+  // ── الدفعات (للمنتجات المفعّل تتبعها فقط): كمية كل دفعة في كل مستودع، وما أُضيف أو سُحب لكل بند ──
+  // مجموع كميات دفعات المنتج في المستودع (مع «بلا دفعة») يساوي دائماً كميته فيه (whQty)
+  const lotted = new Set((db.products || []).filter(isLotTracked).map((p) => p.id));
+  const lotRecs = new Map(); // منتج ← (مستودع|دفعة|انتهاء ← سجل الدفعة)
+  const lotAlloc = new Map(); // `${مستند}:${بند}` ← [{ lot, exp, wh, qty }]
+  const retTaken = new Map(); // ما أُرجع من كل جزء سحبته فاتورة بيع، فلا يُرجَع لدفعتها أكثر مما سحبته
+  const lotEvents = []; // حركات المنتجات المتتبَّعة بترتيب الدفاتر؛ تُوزَّع على الدفعات بعد بناء القيود (انظر distributeLots)
+  const lotIssues = []; // سحب بأكثر من رصيد الدفعات (لا يُعدّ من ملاحظات القيود في issues، وتعرضه صفحة الدفعات)
+  let lotSeq = 0;
+  const lotsOf = (pid) => { let m = lotRecs.get(pid); if (!m) lotRecs.set(pid, m = new Map()); return m; };
+  const lotRec = (pid, wh, lot, exp) => {
+    const m = lotsOf(pid);
+    const key = lotKey(wh, lot, exp);
+    let r = m.get(key);
+    if (!r) m.set(key, r = { product: pid, wh, lot, exp, qty: 0, seq: lotSeq++, key });
+    return r;
+  };
+  // الدفعة التي نفدت تُحذف من السجل (ما يبقى هو ما في المخزون أو ما صار عجزاً)، فلا يتضخم السجل مع السنين
+  const lotTidy = (r) => { if (r.qty === 0) lotsOf(r.product).delete(r.key); };
+  // إضافة كمية لدفعة. الدفعة المسماة تسدّ أولاً أي عجز في «بلا دفعة» (بيع سبق تسجيل شرائه)
+  function lotPut(pid, wh, lot, exp, q) {
+    if (lot || exp) {
+      const none = lotsOf(pid).get(lotKey(wh, '', ''));
+      if (none && none.qty < 0) { const fill = Math.min(q, -none.qty); none.qty = qround(none.qty + fill); q = qround(q - fill); lotTidy(none); }
+    }
+    if (q > 0) { const r = lotRec(pid, wh, lot, exp); r.qty = qround(r.qty + q); lotTidy(r); }
+  }
+  // سحب كمية: بند يحدد دفعة بعينها يسحب منها كلها (وقد تصير سالبة فيظهر الخلل)، وإلا الأقرب انتهاءً فالأبعد.
+  // البيع والتحويل يتخطيان المنتهي، وما لا تكفيه الدفعات الصالحة يُسجَّل عجزاً في «بلا دفعة»
+  function lotTake(p, d, line, q, wh) {
+    const lot = cleanLot(line && line.lot), exp = cleanExp(line && line.exp);
+    const pieces = [];
+    if (lot || exp) {
+      const named = [...lotsOf(p.id).values()].filter((x) => x.wh === wh && x.lot === lot && (!exp || x.exp === exp)).sort(fefoOrder);
+      const r = named.find((x) => x.qty > 0) || named[0] || lotRec(p.id, wh, lot, exp);
+      r.qty = qround(r.qty - q);
+      pieces.push({ lot: r.lot, exp: r.exp, wh, qty: q });
+      if (r.qty < 0) lotIssues.push({ doc: d.id, product: p.id, msg: 'الكمية المسحوبة أكبر من رصيد الدفعة' });
+      lotTidy(r);
+      return pieces;
+    }
+    const skip = d.type === 'sale' || d.type === 'stransfer';
+    const pool = [...lotsOf(p.id).values()].filter((x) => x.wh === wh && x.qty > 0 && !(skip && lotExpired(x, d.date))).sort(fefoOrder);
+    let left = q;
+    for (const r of pool) {
+      if (!(left > 0)) break;
+      const t = Math.min(left, r.qty);
+      r.qty = qround(r.qty - t); left = qround(left - t);
+      pieces.push({ lot: r.lot, exp: r.exp, wh, qty: t });
+      lotTidy(r);
+    }
+    if (left > 0) {
+      const r = lotRec(p.id, wh, '', '');
+      r.qty = qround(r.qty - left);
+      pieces.push({ lot: '', exp: '', wh, qty: left });
+      lotIssues.push({ doc: d.id, product: p.id, msg: 'الكمية أكبر من الدفعات الصالحة المتوفرة' });
+      lotTidy(r);
+    }
+    return pieces;
+  }
+  // وارد: دفعة البند إن كتبها، وإلا (الرصيد الافتتاحي) دفعات المنتج الافتتاحية، وإلا مرتجع بيع يعود لدفعات فاتورته الأصلية
+  function lotIn(p, d, i, q) {
+    const wh = whOf(d);
+    const line = i >= 0 ? (d.lines || [])[i] : null;
+    const lot = cleanLot(line && line.lot), exp = cleanExp(line && line.exp);
+    const pieces = [];
+    let left = q;
+    const take = (l, e, t) => { if (t > 0) { pieces.push({ lot: l, exp: e, wh, qty: t }); left = qround(left - t); } };
+    if (d.type === 'opening') {
+      for (const x of Array.isArray(p.openLots) ? p.openLots : []) take(cleanLot(x.lot), cleanExp(x.exp), Math.min(left, qround(num(x.qty))));
+    } else if (lot || exp) take(lot, exp, q);
+    else if (d.type === 'sreturn' && d.refId && docById.has(d.refId)) {
+      const ref = docById.get(d.refId);
+      (ref.lines || []).forEach((l, j) => {
+        if (l.product !== p.id) return;
+        (lotAlloc.get(`${ref.id}:${j}`) || []).forEach((pc, k) => {
+          const key = `${ref.id}:${j}:${k}`;
+          const t = Math.min(left, qround(pc.qty - (retTaken.get(key) || 0)));
+          if (t > 0) { retTaken.set(key, qround((retTaken.get(key) || 0) + t)); take(pc.lot, pc.exp, t); }
+        });
+      });
+    }
+    take('', '', left);
+    lotAlloc.set(i >= 0 ? `${d.id}:${i}` : `${d.id}:${p.id}`, pieces);
+    for (const pc of pieces) lotPut(p.id, wh, pc.lot, pc.exp, pc.qty);
+  }
+  function lotOut(p, d, i, q) {
+    const line = i >= 0 ? (d.lines || [])[i] : null;
+    lotAlloc.set(`${d.id}:${i}`, lotTake(p, d, line, q, whOf(d)));
+  }
+  // توزيع الحركات على الدفعات بعد انتهاء بناء القيود، بالترتيب نفسه إلا مرتجع مبيعات بفاتورة من اليوم نفسه: يُعالَج بعد فاتورته
+  // (في الدفاتر الوارد قبل الصادر في اليوم الواحد، فلولا هذا لما عرف المرتجع دفعات فاتورته ودخل «بلا دفعة»)
+  function distributeLots(docs) {
+    const at = new Map(docs.map((d, k) => [d.id, k]));
+    const rank = (d) => {
+      if (d.type === 'sreturn' && d.refId) {
+        const ref = docById.get(d.refId);
+        if (ref && ref.date === d.date && at.get(ref.id) > at.get(d.id)) return at.get(ref.id) + 0.5;
+      }
+      return at.get(d.id);
+    };
+    const order = lotEvents.map((e, n) => ({ e, r: rank(e.d), n })).sort((a, b) => a.r - b.r || a.n - b.n);
+    for (const { e } of order) {
+      if (e.t === 'in') lotIn(e.p, e.d, e.i, e.q);
+      else if (e.t === 'out') lotOut(e.p, e.d, e.i, e.q);
+      else {
+        const pieces = lotTake(e.p, e.d, e.d.lines[e.i], e.q, e.d.from);
+        lotAlloc.set(`${e.d.id}:${e.i}`, pieces);
+        for (const pc of pieces) lotPut(e.p.id, e.d.to, pc.lot, pc.exp, pc.qty);
+      }
+    }
+  }
+  // الكمية الصالحة (غير المنتهية بتاريخ المستند) في مستودع، أو في كل المستودعات إن لم يُحدد
+  const lotValid = (pid, wh, date) => {
+    let t = 0;
+    for (const r of lotsOf(pid).values()) if ((!wh || r.wh === wh) && !lotExpired(r, date)) t += r.qty;
+    return qround(t);
+  };
+
   // ── المخزون بالتكلفة المتوسطة المرجحة ──
   const st = (pid) => { let s = stock.get(pid); if (!s) stock.set(pid, s = { qty: 0, value: 0, last: null }); return s; };
   const unitOf = (s, p) => (s.qty > 0 ? Math.max(0, s.value / s.qty) : (s.last != null ? s.last : num(p.cost)));
@@ -540,6 +678,7 @@ export function buildBooks(db, opts = {}) {
     }
     if (q > 0) s.last = val / q;
     whAdd(p.id, whOf(d), q);
+    if (lotted.has(p.id)) lotEvents.push({ t: 'in', p, d, i, q });
     move(p, d, i, q, val, s, variance);
     return variance;
   }
@@ -553,6 +692,7 @@ export function buildBooks(db, opts = {}) {
     if (s.qty === 0 && s.value !== 0) { cost = R(cost + s.value); s.value = 0; }
     if (s.qty < 0) issues.push({ doc: d.id, product: p.id, msg: 'رصيد المخزون صار سالباً' });
     whAdd(p.id, whOf(d), -q);
+    if (lotted.has(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
     move(p, d, i, -q, -cost, s);
     return { cost, unit };
   }
@@ -565,6 +705,7 @@ export function buildBooks(db, opts = {}) {
     let residue = 0;
     if (s.qty === 0 && s.value !== 0) { residue = s.value; s.value = 0; }
     whAdd(p.id, whOf(d), -q);
+    if (lotted.has(p.id)) lotEvents.push({ t: 'out', p, d, i, q });
     move(p, d, i, -q, -val, s, residue);
     return residue;
   }
@@ -848,14 +989,16 @@ export function buildBooks(db, opts = {}) {
   }
   // التحويل بين المستودعات: كميات فقط بلا قيد (التكلفة واحدة للمنشأة)
   function postStockTransfer(d) {
-    for (const l of d.lines || []) {
+    (d.lines || []).forEach((l, i) => {
       const p = products.get(l.product);
       const q = qround(num(l.qty) * lineFactor(l));
-      if (!p || p.type !== 'stock' || !(q > 0) || !d.from || !d.to || d.from === d.to) continue;
+      if (!p || p.type !== 'stock' || !(q > 0) || !d.from || !d.to || d.from === d.to) return;
       whAdd(p.id, d.from, -q);
       whAdd(p.id, d.to, q);
+      // الدفعات تنتقل مع الكمية: تُسحب من المصدر وتصل المستودع الآخر بنفس رقمها وتاريخها
+      if (lotted.has(p.id)) lotEvents.push({ t: 'xfer', p, d, i, q });
       whMoves.push({ product: p.id, doc: d.id, no: d.no, date: d.date, from: d.from, to: d.to, qty: q });
-    }
+    });
   }
 
   // الإهلاك الشهري لكل الأصول في قيد واحد بنهاية الشهر
@@ -948,6 +1091,7 @@ export function buildBooks(db, opts = {}) {
   }
   const docs = [opening, ...(db.docs || []).filter((d) => handlers[d.type] && d.type !== 'opening' && !DOC_TYPES[d.type]?.virtual), ...virtual].sort(docOrder);
   for (const d of docs) handlers[d.type](d);
+  if (lotEvents.length) distributeLots(docs);
 
   // ── مطابقة الدفعات مع الفواتير: الربط الصريح أولاً ثم الأقدم فالأقدم ──
   const remaining = new Map();
@@ -1013,7 +1157,7 @@ export function buildBooks(db, opts = {}) {
   const cancelled = new Map();
   for (const d of db.docs || []) if (d.type === 'sreturn' && d.cancels && d.refId) cancelled.set(d.refId, d.id);
 
-  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves, cancelled };
+  return { dec, today, postings, entries, totals, lineCosts, stock, moves, partyItems, remaining, applications, partyBalance, openItems, status, issues, schedules, whQty, whMoves, cancelled, lots: lotRecs, lotAlloc, lotIssues, lotValid };
 }
 
 // ═══ الإرجاع والإلغاء والمخزون السالب ═══
@@ -1133,7 +1277,9 @@ export function installmentRows(doc, open, dec = 2) {
   return rows;
 }
 
-// نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله)
+// نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله).
+// المنتج المتتبَّع بالدفعات يُباع من الدفعات الصالحة فقط (expired: كمية المنتهي المتوفرة منه)، والبند الذي اختار دفعة بعينها
+// يُفحَص برصيد تلك الدفعة (lot)
 export function stockShortages(db, books, doc, existing = null) {
   if (!doc || (doc.type !== 'sale' && doc.type !== 'preturn')) return [];
   const products = new Map((db.products || []).map((p) => [p.id, p]));
@@ -1145,16 +1291,75 @@ export function stockShortages(db, books, doc, existing = null) {
     }
     return m;
   };
+  const picks = (d) => {
+    const m = new Map();
+    for (const l of (d && d.lines) || []) {
+      const p = products.get(l.product);
+      const lot = cleanLot(l.lot), exp = cleanExp(l.exp);
+      if (!isLotTracked(p) || (!lot && !exp)) continue;
+      const k = [p.id, lot, exp].join('\u0001');
+      m.set(k, { product: p.id, lot, exp, q: round((m.get(k) ? m.get(k).q : 0) + num(l.qty) * lineFactor(l), 3) });
+    }
+    return m;
+  };
   const want = sum(doc);
-  const mine = existing && existing.type === doc.type && (existing.wh || null) === (doc.wh || null) ? sum(existing) : new Map();
+  const same = !!existing && existing.type === doc.type && (existing.wh || null) === (doc.wh || null);
+  const mine = same ? sum(existing) : new Map();
   const multi = (db.warehouses || []).length > 0 && doc.wh;
   const out = [];
   for (const [pid, w] of want) {
-    const have = multi ? (books.whQty.get(pid)?.get(doc.wh) || 0) : (books.stock.get(pid)?.qty || 0);
+    const total = multi ? (books.whQty.get(pid)?.get(doc.wh) || 0) : (books.stock.get(pid)?.qty || 0);
+    const byLot = doc.type === 'sale' && isLotTracked(products.get(pid)) && !!books.lotValid;
+    const have = byLot ? books.lotValid(pid, multi ? doc.wh : null, doc.date) : total;
     const avail = round(have + (mine.get(pid) || 0), 3);
-    if (w > avail + 1e-9) out.push({ product: pid, name: products.get(pid).name, want: w, have: avail });
+    const expired = byLot ? round(total - have, 3) : 0;
+    if (w > avail + 1e-9) out.push({ product: pid, name: products.get(pid).name, want: w, have: avail, ...(expired > 0 ? { expired } : {}) });
+  }
+  const minePick = same ? picks(existing) : new Map();
+  for (const [k, x] of picks(doc)) {
+    let have = 0;
+    for (const r of (books.lots && books.lots.get(x.product) ? books.lots.get(x.product).values() : [])) {
+      if ((!multi || r.wh === doc.wh) && r.lot === x.lot && (!x.exp || r.exp === x.exp)) have += r.qty;
+    }
+    const avail = round(have + (minePick.has(k) ? minePick.get(k).q : 0), 3);
+    if (x.q > avail + 1e-9) out.push({ product: x.product, name: products.get(x.product).name, want: x.q, have: avail, lot: x.lot || x.exp });
   }
   return out;
+}
+
+// الدفعات المتاحة للاختيار في بند سحب (بيع، مرتجع مشتريات، تسوية بالنقص): ما فيه رصيد، الأقرب انتهاءً أولاً.
+// المنتهي لا يُعرض إلا إن طُلب (expired)، و«بلا دفعة» لا يُختار بل يُسحب تلقائياً
+export function lotChoices(books, pid, wh, date, { expired = false } = {}) {
+  const out = [];
+  const m = books.lots && books.lots.get(pid);
+  if (m) for (const r of m.values()) if ((!wh || r.wh === wh) && r.qty > 0 && (r.lot || r.exp) && (expired || !lotExpired(r, date))) out.push(r);
+  return out.sort(fefoOrder).map((r) => ({ lot: r.lot, exp: r.exp, qty: r.qty, wh: r.wh }));
+}
+
+// تقرير الدفعات: كل دفعة فيها رصيد وحالتها (منتهية، تنتهي خلال alertDays يوماً، سليمة، أو بلا دفعة) وقيمتها بمتوسط تكلفة المنتج
+export function lotReport(db, books, { today = ymd(), alertDays = 30 } = {}) {
+  const dec = books.dec;
+  const products = new Map((db.products || []).map((p) => [p.id, p]));
+  const rows = [];
+  for (const [pid, m] of books.lots || []) {
+    const p = products.get(pid);
+    if (!p) continue;
+    const s = books.stock.get(pid) || { qty: 0, value: 0 };
+    const unit = s.qty > 0 ? s.value / s.qty : num(p.cost);
+    for (const r of m.values()) {
+      if (!r.qty) continue;
+      const days = r.exp ? daysBetween(today, r.exp) : null;
+      const state = !r.lot && !r.exp ? 'none' : days == null ? 'ok' : days < 0 ? 'expired' : days <= alertDays ? 'soon' : 'ok';
+      rows.push({ product: p, wh: r.wh, lot: r.lot, exp: r.exp, qty: r.qty, days, state, value: round(r.qty * unit, dec) });
+    }
+  }
+  const rank = { expired: 0, soon: 1, none: 2, ok: 3 };
+  rows.sort((a, b) => rank[a.state] - rank[b.state] || (a.exp || '9999-99-99').localeCompare(b.exp || '9999-99-99') || a.product.name.localeCompare(b.product.name, 'ar'));
+  const tally = (st) => {
+    const x = rows.filter((r) => r.state === st && r.qty > 0);
+    return { count: x.length, qty: round(x.reduce((t, r) => t + r.qty, 0), 3), value: round(x.reduce((t, r) => t + r.value, 0), dec) };
+  };
+  return { rows, expired: tally('expired'), soon: tally('soon'), none: tally('none'), alertDays };
 }
 
 export function matchItems(list, R = (x) => round(x, 2)) {
@@ -1547,6 +1752,15 @@ export function base64(bytes) {
 // الرقم الضريبي السعودي: 15 رقماً يبدأ وينتهي بـ 3
 export const validSaudiVat = (v) => /^3\d{13}3$/.test(String(v || '').trim());
 
+// حقول الدفعة في بند منتج متتبَّع: تاريخ الانتهاء صحيح، والشراء لا يدخل المخزون بلا دفعة ولا تاريخ (need)
+function lotRules(e, p, l, i, need) {
+  if (!isLotTracked(p)) return;
+  const hasExp = l.exp != null && String(l.exp).trim() !== '';
+  if (hasExp && !isDate(l.exp)) e['exp' + i] = 'اكتب تاريخ انتهاء صحيحاً';
+  if (String(l.lot == null ? '' : l.lot).trim().length > 60) e['lot' + i] = 'رقم الدفعة أطول من 60 حرفاً';
+  else if (need && !String(l.lot == null ? '' : l.lot).trim() && !hasExp) e['lot' + i] = 'اكتب رقم الدفعة أو تاريخ انتهائها';
+}
+
 // ─── التحقق من المستندات قبل الحفظ ───
 export function validateDoc(db, d) {
   const e = {};
@@ -1578,7 +1792,9 @@ export function validateDoc(db, d) {
   if (T.lines) {
     const lines = d.lines || [];
     if (!lines.length) e.lines = 'أضف بنداً واحداً على الأقل';
+    const pm = new Map((db.products || []).map((p) => [p.id, p]));
     lines.forEach((l, i) => {
+      lotRules(e, pm.get(l.product), l, i, d.type === 'purchase');
       if (!(num(l.qty) > 0)) e['qty' + i] = 'الكمية أكبر من صفر';
       if (l.factor != null && l.factor !== '' && !(num(l.factor) > 0)) e['qty' + i] = 'معامل الوحدة غير صحيح';
       if (num(l.price) < 0) e['price' + i] = 'السعر لا يكون سالباً';
@@ -1721,6 +1937,7 @@ export function validateDoc(db, d) {
       if (!p || p.type !== 'stock') e['product' + i] = 'اختر منتجاً مخزنياً';
       if (!num(l.qty)) e['qty' + i] = 'الفرق لا يكون صفراً';
       if (l.cost !== '' && l.cost != null && num(l.cost) < 0) e['cost' + i] = 'التكلفة لا تكون سالبة';
+      lotRules(e, p, l, i, false);
     });
   }
   return e;

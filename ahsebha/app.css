@@ -323,6 +323,17 @@ textarea.inp { min-height: 76px; resize: vertical; line-height: 1.6; }
 .unit-row:last-child { border-bottom: 0; }
 .unit-row .inp { min-height: 36px; padding: 6px 9px; }
 @media (max-width: 560px) { .unit-row { grid-template-columns: 1fr 1fr 36px; } .unit-row.line-h { display: none; } .unit-row [data-uk="price"], .unit-row [data-uk="barcode"] { grid-column: span 1; } }
+/* الدفعات: صفوف دفعات الرصيد الافتتاحي في بطاقة المنتج، وسطر الدفعة تحت بنود الفواتير والتسوية */
+.lot-rows { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.lot-row { display: grid; grid-template-columns: minmax(120px, 1.4fr) minmax(130px, 1.1fr) minmax(80px, .7fr) 36px; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.lot-row:last-child { border-bottom: 0; }
+.lot-row .inp { min-height: 36px; padding: 6px 9px; }
+.lot-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.lot-line .inp { min-height: 34px; padding: 4px 8px; font-size: .85rem; width: auto; max-width: 100%; }
+.lot-line .lot-n { width: 11rem; }
+.lot-line .lot-d { width: 9.5rem; }
+.a-lot { grid-column: 1 / -1; }
+@media (max-width: 560px) { .lot-row { grid-template-columns: 1fr 1fr 36px; } .lot-row.line-h { display: none; } .lot-row [data-olk="lot"] { grid-column: 1 / -1; } .lot-line .lot-n, .lot-line .lot-d, .lot-line select.inp { flex: 1 1 8rem; width: auto; } }
 
 /* مسير الرواتب والتحويلات المخزنية */
 .pay-tbl td { padding: 6px 6px; }
@@ -536,6 +547,7 @@ html[data-role="cashier"] .page-head [data-del], html[data-role="cashier"] .page
 
 /* الفاتورة ثنائية اللغة: الإنجليزي سطر صغير تحت العربي */
 .paper .pp-en { display: block; font-style: normal; font-size: .8em; font-weight: 600; color: #6b7280; line-height: 1.25; }
+.paper .pp-lot { display: block; font-style: normal; font-size: .76em; font-weight: 500; color: #6b7280; line-height: 1.25; }
 .pp-lines th .pp-en { color: #4f46e5; }
 .receipt .pp-lines th .pp-en { color: #374151; }
 .pp-en-name { font-weight: 700; }

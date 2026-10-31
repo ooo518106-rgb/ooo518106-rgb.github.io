@@ -1,6 +1,6 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck, listPrice } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck, listPrice, isLotTracked } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
@@ -75,7 +75,8 @@ export function pos({ root }) {
     const inCart = cart.lines.filter((l) => l.product === p.id).reduce((t, l) => t + num(l.qty) * lineFactor(l), 0);
     const books = store.getBooks();
     const wh = posWh();
-    const have = wh ? (books.whQty.get(p.id)?.get(wh) || 0) : (books.stock.get(p.id)?.qty || 0);
+    // المنتج المتتبَّع بالدفعات يُباع من الصالح فقط: المنتهي لا يدخل المتوفر
+    const have = isLotTracked(p) ? books.lotValid(p.id, wh || null, today()) : wh ? (books.whQty.get(p.id)?.get(wh) || 0) : (books.stock.get(p.id)?.qty || 0);
     return round(have - inCart, 3);
   };
   // سياسة «منع البيع بأكثر من المخزون» (من الإعدادات): لا يُضاف للسلة أكثر من المتوفر
@@ -285,7 +286,11 @@ export function pos({ root }) {
     // الحماية الأخيرة لسياسة المنع: قد يتغير المخزون من نافذة أخرى بعد تعبئة السلة
     if (S().negativeStock === 'block') {
       const short = stockShortages(store.getDb(), store.getBooks(), doc)[0];
-      if (short) { toast(`لا يمكن إتمام البيع: المتوفر من «${short.name}» ${short.have} فقط`, 'err'); return; }
+      if (short) { toast(`لا يمكن إتمام البيع: المتوفر${short.expired ? ' الصالح' : ''} من «${short.name}» ${short.have} فقط${short.expired ? ` (${short.expired} منتهية الصلاحية لا تُباع)` : ''}`, 'err'); return; }
+    } else {
+      // سياسة «تنبيه فقط»: البيع بأكثر من الدفعات الصالحة مع وجود منتهية يحتاج تأكيداً صريحاً
+      const gone = stockShortages(store.getDb(), store.getBooks(), doc).filter((x) => x.expired);
+      if (gone.length && !(await confirmBox(`${gone.map((x) => `«${x.name}»: المتوفر الصالح ${x.have} فقط و${x.expired} منتهية الصلاحية لا تُباع`).join('، ')}. هل تريد المتابعة؟`, { ok: 'متابعة البيع', title: 'دفعات منتهية الصلاحية' }))) return;
     }
     // حد دين العميل: تنبيه أو منع حسب الإعدادات، وفقط حين يزيد البيع الآجل دينه فيتجاوز حده
     const cc = creditCheck(store.getDb(), store.getBooks(), doc);

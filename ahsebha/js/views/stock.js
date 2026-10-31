@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import { docNo, num, round, validateDoc, MAIN_WH } from '../core.js';
 import { html, raw, qty, fmtDate, toast, confirmBox, combo, $, $$, field, empty, showErrors } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, S, today, productItems, printPaper, docLocked, lockedNote, lockedPage } from './common.js';
+import { head, bindRows, S, today, productItems, printPaper, docLocked, lockedNote, lockedPage, lineLots } from './common.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 export const whName = (id) => store.getDb().warehouses.find((w) => w.id === id)?.name || (id === MAIN_WH ? 'المستودع الرئيسي' : '—');
@@ -90,7 +90,7 @@ export function show(type, { root, params }) {
   setTitle('تحويل مخزني ' + no);
   const locked = docLocked(d);
   const table = html`<table class="tbl" data-table><thead><tr><th>الصنف</th><th class="num">الكمية</th></tr></thead><tbody>
-    ${d.lines.map((l) => html`<tr><td>${store.findProduct(l.product)?.name || ''}</td><td class="num">${qty(l.qty)} ${store.findProduct(l.product)?.unit || ''}</td></tr>`)}</tbody></table>`;
+    ${d.lines.map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineLots(store.getBooks(), d, i) ? html`<small class="c-sub">${lineLots(store.getBooks(), d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)} ${store.findProduct(l.product)?.unit || ''}</td></tr>`)}</tbody></table>`;
   root.innerHTML = String(html`${head('تحويل مخزني ' + no, { sub: `${fmtDate(d.date)} · من ${whName(d.from)} إلى ${whName(d.to)}`,
     actions: html`<button class="btn btn-primary" data-print>🖨️ طباعة</button>${locked ? '' : html`<a class="btn btn-ghost" href="#/stock-transfers/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}
     ${locked ? lockedNote(d) : ''}${d.notes ? html`<p class="muted" style="margin-bottom:10px">${d.notes}</p>` : ''}
