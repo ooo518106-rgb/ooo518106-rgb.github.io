@@ -1,6 +1,6 @@
 // ═══ الكاشير (نقطة البيع) وتقفيل الصندوق اليومي ═══
 import * as store from '../store.js';
-import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages } from '../core.js';
+import { calcDoc, validateDoc, num, round, docNo, moneyAccounts, balances, paymentList, nextAccountCode, lineFactor, stockShortages, creditCheck } from '../core.js';
 import { html, raw, money, moneyText, toast, confirmBox, modal, combo, $, $$, norm, field, fmtDate } from '../ui.js';
 import { go, setTitle, docHref, withQuery } from '../nav.js';
 import { S, dec, today, partyItems, quickParty, docPaper, printPaper, cameraDialog, partyName, accName, defaultWh } from './common.js';
@@ -96,9 +96,18 @@ export function pos({ root }) {
     })}`) : String(html`<div class="empty" style="grid-column:1/-1"><p>لا توجد منتجات مطابقة. ${products.length ? '' : html`<a href="#/products/new">أضف منتجاتك</a> أو <a href="#/import?type=products">استوردها من Excel</a>.`}</p></div>`);
   }
 
-  const calc = () => calcDoc({ vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive, lines: cart.lines }, dec());
+  const calc = () => calcDoc({ vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive, lines: cart.lines, discMode: cart.discMode, discVal: cart.discVal }, dec());
+  // خصم الفاتورة المبلغ لا يتجاوز قيمة السلة بعد حذف بنود منها، ويزول بزوالها
+  function fixDisc() {
+    if (!cart.discMode) return;
+    const b = calcDoc({ vatRate: 0, lines: cart.lines }, dec());
+    const room = round(b.gross - b.discount, dec());
+    if (!cart.lines.length || !(room > 0)) { delete cart.discMode; delete cart.discVal; }
+    else if (cart.discMode === 'amt' && num(cart.discVal) > room) cart.discVal = room;
+  }
 
   function drawCart() {
+    fixDisc();
     const T = calc();
     const box = $('[data-lines]', root);
     box.innerHTML = cart.lines.length ? String(html`${cart.lines.map((l, i) => html`<div class="pos-line" data-i="${i}">
@@ -110,6 +119,8 @@ export function pos({ root }) {
     const count = cart.lines.reduce((t, l) => t + num(l.qty), 0);
     $('[data-totals]', root).innerHTML = String(html`
       ${T.discount ? html`<div class="row"><span>الخصم</span>${money(-T.discount)}</div>` : ''}
+      ${T.docDiscount ? html`<div class="row"><span>خصم الفاتورة${cart.discMode === 'pct' ? ` (${num(cart.discVal)}%)` : ''}</span>${money(-T.docDiscount)}</div>` : ''}
+      ${cart.lines.length ? html`<div class="pos-disc"><button type="button" class="btn btn-ghost btn-sm" data-disc>🏷️ ${cart.discMode ? 'تعديل خصم الفاتورة' : 'خصم على الفاتورة'}</button></div>` : ''}
       ${s.vat ? html`<div class="row"><span>قبل الضريبة</span>${money(T.net)}</div><div class="row"><span>الضريبة ${num(s.vatRate)}%</span>${money(T.vat)}</div>` : ''}
       <div class="row grand"><span>الإجمالي <small class="muted">(${count} قطعة)</small></span><span>${money(T.total, { sym: true })}</span></div>`);
     $('[data-bar-t]', root).innerHTML = String(html`🛒 ${count} · <b>${money(T.total, { sym: true })}</b>`);
@@ -188,6 +199,36 @@ export function pos({ root }) {
     }).then(() => { drawCart(); drawGrid(); scan.focus(); });
   }
 
+  // خصم على الفاتورة كلها: نسبة أو مبلغ، يُوزَّع على البنود عند الحساب
+  function discDialog() {
+    if (!cart.lines.length) return;
+    const b = calcDoc({ vatRate: 0, lines: cart.lines }, dec());
+    const room = round(b.gross - b.discount, dec());
+    modal({
+      title: 'خصم على الفاتورة',
+      body: html`<form class="form-grid" novalidate>
+        ${field('نوع الخصم', html`<select class="inp" name="mode"><option value="pct" ${cart.discMode === 'amt' ? '' : raw('selected')}>نسبة ٪</option><option value="amt" ${cart.discMode === 'amt' ? raw('selected') : ''}>مبلغ</option></select>`)}
+        ${field('القيمة', html`<input class="inp" name="val" type="text" inputmode="decimal" data-num value="${cart.discVal ?? ''}" placeholder="0" autofocus>`)}
+        <div class="dlg-actions span-all"><button class="btn btn-primary">تطبيق</button>${cart.discMode ? html`<button type="button" class="btn btn-text-danger" data-remove>إزالة الخصم</button>` : ''}<button type="button" class="btn btn-ghost" data-no>رجوع</button></div></form>`,
+      onMount: (dlg, done) => {
+        const f = $('form', dlg);
+        f.val.select();
+        $('[data-no]', dlg).onclick = () => done(false);
+        const rm = $('[data-remove]', dlg);
+        if (rm) rm.onclick = () => { delete cart.discMode; delete cart.discVal; done(true); };
+        f.onsubmit = (e) => {
+          e.preventDefault();
+          const v = num(f.val.value);
+          if (!(v > 0)) { delete cart.discMode; delete cart.discVal; done(true); return; }
+          if (f.mode.value === 'pct' && v > 100) { toast('نسبة الخصم بين 0 و 100', 'err'); return; }
+          if (f.mode.value === 'amt' && round(v, dec()) > room) { toast('الخصم أكبر من قيمة الفاتورة', 'err'); return; }
+          cart.discMode = f.mode.value; cart.discVal = v;
+          done(true);
+        };
+      },
+    }).then(() => { drawCart(); scan.focus(); });
+  }
+
   // ── الدفع ──
   async function checkout(mode) {
     if (!cart.lines.length) return;
@@ -207,6 +248,7 @@ export function pos({ root }) {
       type: 'sale', date: today(), party: cart.party || null, vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive,
       lines: cart.lines.map((l) => ({ product: l.product, desc: l.desc, qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: l.tax || 'S', ...(l.unit ? { unit: l.unit, factor: num(l.factor) } : {}) })),
       notes: '', payments: result.payments.filter((p) => p.amount > 0), pos: true,
+      ...(cart.discMode ? { discMode: cart.discMode, discVal: num(cart.discVal) } : {}),
     };
     const wh = posWh();
     if (wh) doc.wh = wh;
@@ -218,6 +260,13 @@ export function pos({ root }) {
     if (S().negativeStock === 'block') {
       const short = stockShortages(store.getDb(), store.getBooks(), doc)[0];
       if (short) { toast(`لا يمكن إتمام البيع: المتوفر من «${short.name}» ${short.have} فقط`, 'err'); return; }
+    }
+    // حد دين العميل: تنبيه أو منع حسب الإعدادات، وفقط حين يزيد البيع الآجل دينه فيتجاوز حده
+    const cc = creditCheck(store.getDb(), store.getBooks(), doc);
+    if (cc) {
+      const msg = `هذه الفاتورة تجعل رصيد العميل ${moneyText(cc.after)} وحدّ دينه ${moneyText(cc.limit)} (زيادة ${moneyText(cc.over)}).`;
+      if (S().creditPolicy === 'block') { toast(`${msg} البرنامج مضبوط على منع تجاوز الحد`, 'err'); return; }
+      if (!(await confirmBox(`${msg} هل تريد المتابعة؟`, { ok: 'متابعة البيع', title: 'تجاوز حد الدين' }))) return;
     }
     try { store.saveDoc(doc); } catch (e) { if (handleDemoError(e)) return; throw e; }
     toast(`تم البيع ✓ ${docNo(doc, s)}`);
@@ -307,7 +356,7 @@ export function pos({ root }) {
     modal({
       title: 'الفواتير المعلّقة',
       body: html`<div class="list-mini">${held.map((h) => {
-        const T = calcDoc({ vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive, lines: h.cart.lines }, dec());
+        const T = calcDoc({ vatRate: s.vat ? num(s.vatRate) : 0, inclusive: !!s.inclusive, lines: h.cart.lines, discMode: h.cart.discMode, discVal: h.cart.discVal }, dec());
         return html`<div class="it"><span>${new Date(h.at).toLocaleTimeString('ar-SA-u-nu-latn', { hour: '2-digit', minute: '2-digit' })} · ${h.cart.lines.length} صنف${h.cart.party ? ' · ' + partyName(h.cart.party) : ''}</span>
           <span class="inline"><b>${money(T.total)}</b><button class="btn btn-primary btn-sm" data-resume="${h.id}">استئناف</button><button class="icon-btn" data-drop="${h.id}" aria-label="حذف">✕</button></span></div>`;
       })}</div>`,
@@ -341,7 +390,7 @@ export function pos({ root }) {
         ${field(S().country === 'SA' ? 'حساب البطاقة / مدى' : 'حساب البطاقة وكليك', html`<select class="inp" name="posCard">${accs.money.map((a) => html`<option value="${a.id}" ${a.id === accs.card.id ? raw('selected') : ''}>${a.name}</option>`)}</select>`)}
         ${store.getDb().warehouses.length ? field('المستودع', html`<select class="inp" name="posWh">${store.getDb().warehouses.map((w) => html`<option value="${w.id}" ${w.id === (s.posWh || defaultWh()) ? raw('selected') : ''}>${w.name}</option>`)}</select>`) : ''}
         ${store.getDb().centers.length ? field('الفرع', html`<select class="inp" name="posCc"><option value="">— بدون —</option>${store.getDb().centers.map((c) => html`<option value="${c.id}" ${c.id === s.posCc ? raw('selected') : ''}>${c.name}</option>`)}</select>`) : ''}
-        ${field('حجم الإيصال', html`<select class="inp" name="posPrintSize"><option value="receipt" ${s.posPrintSize !== 'a4' ? raw('selected') : ''}>حراري 80 مم</option><option value="a4" ${s.posPrintSize === 'a4' ? raw('selected') : ''}>A4</option></select>`)}
+        ${field('حجم الإيصال', html`<select class="inp" name="posPrintSize"><option value="receipt" ${s.posPrintSize !== 'a4' && s.posPrintSize !== 'receipt58' ? raw('selected') : ''}>حراري 80 مم</option><option value="receipt58" ${s.posPrintSize === 'receipt58' ? raw('selected') : ''}>حراري 58 مم</option><option value="a4" ${s.posPrintSize === 'a4' ? raw('selected') : ''}>A4</option></select>`)}
         <label class="check span-all"><input type="checkbox" name="posAutoPrint" ${s.posAutoPrint !== false ? raw('checked') : ''}> طباعة الإيصال تلقائياً بعد كل بيع</label>
         <p class="muted small span-all">لإضافة حساب ${S().country === 'SA' ? 'مدى' : 'بطاقات'} أو محفظة: دليل الحسابات ← حساب جديد تحت «الأصول المتداولة» مع تفعيل «صندوق أو بنك».</p>
         <div class="dlg-actions span-all"><button class="btn btn-primary">حفظ</button></div></form>`,
@@ -368,7 +417,8 @@ export function pos({ root }) {
     if (ed) { editLine(Number(ed.dataset.edit)); return; }
     const pay = t.closest('[data-pay]');
     if (pay) { checkout(pay.dataset.pay); return; }
-    if (t.closest('[data-hold]')) hold();
+    if (t.closest('[data-disc]')) discDialog();
+    else if (t.closest('[data-hold]')) hold();
     else if (t.closest('[data-held]')) showHeld();
     else if (t.closest('[data-clear]')) { if (cart.lines.length) confirmBox('إلغاء الفاتورة الحالية؟', { ok: 'إلغاء الفاتورة', danger: true }).then((ok) => { if (ok) { cart = newCart(); $('[data-party]', root).value = ''; drawCart(); drawGrid(); } }); }
     else if (t.closest('[data-cam]')) cameraDialog((code) => { const h = byCode(code); if (h) add(h.p, 1, h.unit); else toast('باركود غير معروف: ' + code, 'err'); return false; }, { title: 'مسح المنتجات بالكاميرا' });

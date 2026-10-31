@@ -47,6 +47,8 @@ export function defaultSettings(o = {}) {
     salePrefix: 'INV-', invoiceNote: '', printSize: 'a4', showHijri: false,
     // الفواتير الصادرة لا تُحذف (تُلغى بإشعار دائن) ما لم يسمح المالك، والبيع بأكثر من المخزون: تنبيه (warn) أو منع (block)
     allowDeleteInvoices: false, negativeStock: 'warn',
+    // تجاوز حد دين العميل بفاتورة آجلة: تنبيه قبل الحفظ (warn) أو منع (block)
+    creditPolicy: 'warn',
     lastBackupAt: null,
     ...o,
   };
@@ -285,30 +287,65 @@ export function docNo(d, S = {}) {
 // S أساسية، Z صفرية، E معفاة، O خارج نطاق الضريبة (مثل الرواتب والرسوم الحكومية) ولا تدخل الإقرار
 export const TAX_CATS = { S: 'خاضع', Z: 'صفري', E: 'معفى', O: 'خارج النطاق' };
 
-// حساب بنود المستند: الخصم، الصافي، الضريبة، الإجمالي (مع دعم الأسعار الشاملة)
+// خصم الفاتورة كلها (doc.discMode: 'pct' نسبة أو 'amt' مبلغ، وdoc.discVal قيمته). يُوزَّع على البنود بنسبة مبالغها بعد
+// خصوماتها الخاصة، فتُحسب الضريبة على ما يدفعه العميل فعلاً ولكل فئة ضريبية حصتها، ويبقى كل ما بعده (القيود والمخزون
+// والمرتجعات وإقرار الضريبة) على أرقام البنود كما هو. الباقي من التقريب يُضاف لآخر بند يتسع له، فيطابق مجموع الحصص الخصم تماماً.
+const hasDocDisc = (doc) => (doc.discMode === 'pct' || doc.discMode === 'amt') && num(doc.discVal) > 0;
+function docShares(doc, amounts, dec) {
+  const sum = round(amounts.reduce((s, a) => s + a, 0), dec);
+  const val = num(doc.discVal);
+  const D = Math.min(sum, doc.discMode === 'pct' ? round(sum * Math.min(100, val) / 100, dec) : round(val, dec));
+  if (!(D > 0)) return null;
+  const shares = amounts.map((a) => round(D * a / sum, dec));
+  let rest = round(D - shares.reduce((s, x) => s + x, 0), dec);
+  for (let i = amounts.length - 1; i >= 0 && rest; i--) {
+    const take = rest > 0 ? Math.min(rest, round(amounts[i] - shares[i], dec)) : Math.max(rest, -shares[i]);
+    if (take) { shares[i] = round(shares[i] + take, dec); rest = round(rest - take, dec); }
+  }
+  return shares;
+}
+// مبلغ البند بعد خصمه الخاص وقبل خصم الفاتورة
+const lineBase = (l, dec) => { const g = round(num(l.qty) * num(l.price), dec); return round(g - round(g * Math.min(100, Math.max(0, num(l.disc))) / 100, dec), dec); };
+
+// حساب بنود المستند: الخصم، الصافي، الضريبة، الإجمالي (مع دعم الأسعار الشاملة وخصم الفاتورة).
+// discount خصوم البنود، وdocDiscount خصم الفاتورة (يُطرح بعدها)؛ وفي كل بند docDisc حصته منه
 export function calcDoc(doc, dec = 2) {
   const rate = num(doc.vatRate);
   const inc = !!doc.inclusive;
   const cats = () => ({ S: { net: 0, vat: 0 }, Z: { net: 0, vat: 0 }, E: { net: 0, vat: 0 }, O: { net: 0, vat: 0 } });
-  const out = { lines: [], gross: 0, discount: 0, net: 0, vat: 0, total: 0, byCat: cats() };
-  for (const l of doc.lines || []) {
+  const out = { lines: [], gross: 0, discount: 0, docDiscount: 0, net: 0, vat: 0, total: 0, byCat: cats() };
+  const lines = doc.lines || [];
+  const shares = hasDocDisc(doc) ? docShares(doc, lines.map((l) => lineBase(l, dec)), dec) : null;
+  let i = 0;
+  for (const l of lines) {
     const qty = num(l.qty), price = num(l.price);
     const disc = Math.min(100, Math.max(0, num(l.disc)));
     const cat = TAX_CATS[l.tax] ? l.tax : 'S';
     const r = cat === 'S' ? rate : 0;
     const gross = round(qty * price, dec);
     const discount = round(gross * disc / 100, dec);
-    const amount = round(gross - discount, dec);
+    const docDisc = shares ? shares[i] : 0;
+    i++;
+    const amount = round(gross - discount - docDisc, dec);
     const net = inc ? round(amount / (1 + r / 100), dec) : amount;
     const vat = inc ? round(amount - net, dec) : round(net * r / 100, dec);
     const total = round(net + vat, dec);
-    out.lines.push({ qty, price, disc, cat, rate: r, gross, discount, net, vat, total });
-    out.gross += gross; out.discount += discount; out.net += net; out.vat += vat; out.total += total;
+    out.lines.push({ qty, price, disc, cat, rate: r, gross, discount, docDisc, net, vat, total });
+    out.gross += gross; out.discount += discount; out.docDiscount += docDisc; out.net += net; out.vat += vat; out.total += total;
     out.byCat[cat].net += net; out.byCat[cat].vat += vat;
   }
-  for (const k of ['gross', 'discount', 'net', 'vat', 'total']) out[k] = round(out[k], dec);
+  for (const k of ['gross', 'discount', 'docDiscount', 'net', 'vat', 'total']) out[k] = round(out[k], dec);
   for (const c of Object.values(out.byCat)) { c.net = round(c.net, dec); c.vat = round(c.vat, dec); }
   return out;
+}
+
+// خصم الفاتورة الأصلية كنسبة مئوية يرثها المرتجع (يبقى الخصم متناسباً مهما كانت الكمية المرتجعة، والإلغاء الكامل يعكسه تماماً)
+export function inheritedDiscount(db, ref) {
+  const dec = currencyInfo(db.settings?.currency).dec;
+  const T = calcDoc(ref, dec);
+  const base = round(T.gross - T.discount, dec);
+  if (!(T.docDiscount > 0) || !(base > 0)) return null;
+  return { discMode: 'pct', discVal: round(T.docDiscount * 100 / base, 6) };
 }
 
 // طرق الدفع المسجلة على المستند: قائمة payments، أو الحقلان القديمان paid/payAcc
@@ -999,6 +1036,7 @@ export function cancelCreditNote(db, inv, { date, reason = '', refund = null } =
   const lines = returnLines(db, inv, 'sreturn');
   const cn = {
     type: 'sreturn', date, party: inv.party || '', refId: inv.id, cancels: true, vatRate: inv.vatRate, inclusive: !!inv.inclusive, lines,
+    ...(inheritedDiscount(db, inv) || {}),
     notes: `إلغاء الفاتورة ${docNo(inv, db.settings)}${reason ? ' — ' + reason : ''}`,
   };
   if (inv.wh) cn.wh = inv.wh;
@@ -1021,6 +1059,24 @@ export function cancelCreditNote(db, inv, { date, reason = '', refund = null } =
     if (paid > 0) { cn.paid = paid; cn.payAcc = refund.acc; }
   }
   return cn;
+}
+
+// حد دين العميل (creditLimit في بطاقته): ما سيصير عليه بعد هذه الفاتورة = رصيده الحالي + المتبقي منها.
+// يرجّع التفاصيل إن زادت الفاتورة دينه فتجاوز حده، وإلا null. existing: النسخة المحفوظة عند تعديل فاتورة، فيُطرح أثرها من
+// رصيده ولا يُنبَّه إن لم يزد دين التعديل عمّا كان (تعديل الملاحظات مثلاً على فاتورة تجاوزت الحد من قبل)
+export function creditCheck(db, books, doc, existing = null) {
+  if (!doc || doc.type !== 'sale' || !doc.party) return null;
+  const party = (db.parties || []).find((p) => p.id === doc.party);
+  const limit = num(party && party.creditLimit);
+  if (!(limit > 0)) return null;
+  const dec = currencyInfo(db.settings?.currency).dec;
+  const owed = (d) => round(calcDoc(d, dec).total - paymentList(d).reduce((t, p) => t + Math.max(0, num(p.amount)), 0), dec);
+  const adds = owed(doc);
+  const old = existing && existing.party === doc.party ? owed(existing) : 0;
+  if (!(adds > old)) return null;
+  const balance = round((books.partyBalance.get(party.id) || 0) - old, dec);
+  const after = round(balance + adds, dec);
+  return after > limit ? { limit, balance, adds, after, over: round(after - limit, dec) } : null;
 }
 
 // نواقص المخزون لمستند بيع أو مرتجع مشتريات: منتجات كميتها المطلوبة أكبر من المتوفر (مع احتساب كمية المستند نفسه عند تعديله)
@@ -1475,6 +1531,16 @@ export function validateDoc(db, d) {
       if (num(l.disc) < 0 || num(l.disc) > 100) e['disc' + i] = 'الخصم بين 0 و 100';
       if (!l.product && !String(l.desc || '').trim()) e['desc' + i] = 'اختر منتجاً أو اكتب وصفاً';
     });
+    if (d.discMode != null && d.discMode !== '') {
+      const v = num(d.discVal);
+      if (d.discMode !== 'pct' && d.discMode !== 'amt') e.disc = 'نوع خصم الفاتورة غير صحيح';
+      else if (!(v >= 0)) e.disc = 'خصم الفاتورة لا يكون سالباً';
+      else if (d.discMode === 'pct' && v > 100) e.disc = 'نسبة خصم الفاتورة بين 0 و 100';
+      else if (d.discMode === 'amt') {
+        const b = calcDoc({ ...d, discMode: null }, dec);
+        if (round(v, dec) > round(b.gross - b.discount, dec)) e.disc = 'خصم الفاتورة أكبر من قيمتها';
+      }
+    }
     if ((d.type === 'sreturn' || d.type === 'preturn') && d.refId) {
       // المرتجع لا يتجاوز ما بيع في الفاتورة الأصلية بعد خصم المرتجعات السابقة عليها
       const left = returnableQty(db, d.refId, d.type, d.id);

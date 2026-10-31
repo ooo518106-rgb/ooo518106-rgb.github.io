@@ -1,7 +1,7 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
@@ -157,6 +157,7 @@ export function form(type, { root, params, query }) {
     const src = store.findDoc(query.from || query.copy);
     if (src && src.lines) {
       d.party = src.party; d.lines = clone(src.lines); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
+      if (src.discMode) { d.discMode = src.discMode; d.discVal = src.discVal; }
       if (query.from && NO_POSTING.includes(src.type)) d.fromQuote = src.id;
       if (src.type === 'porder' || src.type === 'sorder') { d.dueDate = ''; d.ref = src.ref || ''; }
     }
@@ -165,6 +166,7 @@ export function form(type, { root, params, query }) {
       // المرتجع يبدأ بما تبقى للإرجاع من الفاتورة (بعد المرتجعات السابقة)
       const rest = returnLines(db, refDoc, type);
       d.refId = refDoc.id; d.party = refDoc.party; d.lines = rest.length ? rest : [emptyLine()]; d.inclusive = !!refDoc.inclusive; d.vatRate = num(refDoc.vatRate);
+      Object.assign(d, inheritedDiscount(db, refDoc) || {});
     }
     if (query.product) { const p = store.findProduct(query.product); if (p) d.lines = [lineFromProduct(p)]; }
   }
@@ -249,6 +251,12 @@ export function form(type, { root, params, query }) {
               <input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-split="${a.id}" placeholder="0"></label>`)}</div>
               <div class="fld" style="margin-top:8px"><span class="fld-l">المتبقي ${C.kind === 'customer' ? 'على العميل' : 'للمورد'}</span><div class="kpi-v" style="font-size:1.1rem" data-split-rest></div></div></div>
             <small class="fld-e" data-err="paid" hidden></small></div>` : ''}
+          <div class="card"><div class="fld"><span class="fld-l">خصم على الفاتورة كلها</span>
+            <div class="inline"><select class="inp disc-mode" data-k="discMode" aria-label="نوع خصم الفاتورة">
+              <option value="" ${d.discMode ? '' : raw('selected')}>بدون خصم</option><option value="pct" ${d.discMode === 'pct' ? raw('selected') : ''}>نسبة ٪</option><option value="amt" ${d.discMode === 'amt' ? raw('selected') : ''}>مبلغ</option></select>
+              <input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="discVal" data-f="disc" value="${d.discVal ?? ''}" placeholder="0" aria-label="قيمة خصم الفاتورة" ${d.discMode ? '' : raw('hidden')}></div>
+            <small class="fld-e" data-err="disc" hidden></small>
+            <small class="fld-h">${showTax ? html`يُوزَّع على البنود، فتُحسب ${taxLabel()} على السعر بعد الخصم.` : 'يُوزَّع على البنود بنسبة مبالغها.'}</small></div></div>
           <div class="card">${field('ملاحظات تظهر في المستند', html`<textarea class="inp" data-k="notes" rows="2">${d.notes || ''}</textarea>`)}</div>
         </div>
         <div class="card" data-totals></div>
@@ -335,7 +343,9 @@ export function form(type, { root, params, query }) {
     const t = calc();
     $$('.line[data-i]', linesBox).forEach((row) => { const L = t.lines[Number(row.dataset.i)]; const el = $('[data-tot]', row); if (el && L) el.innerHTML = String(money(L.total)); });
     totalsBox.innerHTML = String(html`<div class="totals">
-      ${t.discount ? html`<div class="row"><span>المجموع قبل الخصم</span>${money(t.gross)}</div><div class="row"><span>الخصم</span>${money(-t.discount)}</div>` : ''}
+      ${t.discount || t.docDiscount ? html`<div class="row"><span>المجموع قبل الخصم</span>${money(t.gross)}</div>` : ''}
+      ${t.discount ? html`<div class="row"><span>الخصم</span>${money(-t.discount)}</div>` : ''}
+      ${t.docDiscount ? html`<div class="row"><span>خصم على الفاتورة</span>${money(-t.docDiscount)}</div>` : ''}
       ${showTax ? html`<div class="row"><span>الإجمالي قبل الضريبة</span>${money(t.net)}</div><div class="row"><span>${taxLabel()} (${num(d.vatRate)}%)</span>${money(t.vat)}</div>` : ''}
       <div class="row grand"><span>الإجمالي</span><span>${money(t.total, { sym: true })}</span></div>
     </div>${receiptCheck(d.scan, t)}`);
@@ -370,7 +380,7 @@ export function form(type, { root, params, query }) {
     const p = store.findParty(d.party);
     if (!p) { box.textContent = ''; return; }
     const bal = store.getBooks().partyBalance.get(p.id) || 0;
-    box.innerHTML = String(html`الرصيد الحالي: ${money(bal, { sym: true })}${p.vatNo ? html` · ضريبي: <span dir="ltr">${p.vatNo}</span>` : ''}`);
+    box.innerHTML = String(html`الرصيد الحالي: ${money(bal, { sym: true })}${type === 'sale' && num(p.creditLimit) > 0 ? html` · حد الدين: ${money(p.creditLimit, { sym: true })}` : ''}${p.vatNo ? html` · ضريبي: <span dir="ltr">${p.vatNo}</span>` : ''}`);
   }
 
   const dirty = () => { guard.dirty = true; };
@@ -412,9 +422,24 @@ export function form(type, { root, params, query }) {
     if (k === 'inclusive') return;
     d[k] = el.value;
     dirty();
+    if (k === 'discVal' || k === 'discMode') drawTotals();
   });
+  // أدوات خصم الفاتورة تتبع حالة المستند (عند نسخ بنود فاتورة أصلية مثلاً)
+  function syncDisc() {
+    const mode = $('[data-k="discMode"]', root);
+    const val = $('[data-k="discVal"]', root);
+    mode.value = d.discMode || '';
+    val.hidden = !d.discMode;
+    if (document.activeElement !== val) val.value = d.discVal ?? '';
+  }
   root.addEventListener('change', (e) => {
     const el = e.target;
+    if (el.dataset.k === 'discMode') {
+      d.discMode = el.value;
+      if (!d.discMode) d.discVal = '';
+      dirty(); syncDisc(); drawTotals();
+      if (d.discMode) $('[data-k="discVal"]', root).focus();
+    }
     if (el.dataset.k === 'tax') { d.lines[Number(el.closest('.line').dataset.i)].tax = el.value; dirty(); drawTotals(); }
     if (el.dataset.k === 'unit') {
       const i = Number(el.closest('.line').dataset.i);
@@ -443,6 +468,9 @@ export function form(type, { root, params, query }) {
     const rest = returnLines(db, r, type, existing && existing.id);
     if (!rest.length) toast('أُرجعت كل بنود هذه الفاتورة مسبقاً', 'warn');
     d.lines = rest.length ? rest : [emptyLine()]; d.inclusive = !!r.inclusive; d.vatRate = num(r.vatRate);
+    const inh = inheritedDiscount(db, r);
+    if (inh) Object.assign(d, inh); else { delete d.discMode; delete d.discVal; }
+    syncDisc();
     if (!d.party) { d.party = r.party; $('[data-party]', root).value = partyName(r.party); partyInfo(); }
     const inc = $('[data-k="inclusive"]', root);
     if (inc) inc.checked = d.inclusive;
@@ -480,7 +508,7 @@ export function form(type, { root, params, query }) {
     else $(`.line[data-i="${i + 1}"] [data-k="desc"]`, linesBox)?.focus();
   });
 
-  function save(after) {
+  async function save(after) {
     // تنظيف البنود الفارغة
     const lines = d.lines.filter((l) => l.product || String(l.desc || '').trim() || num(l.price));
     const doc = {
@@ -493,6 +521,8 @@ export function form(type, { root, params, query }) {
       notes: String(d.notes || '').trim(),
     };
     if (!doc.files || !doc.files.length) delete doc.files;
+    // خصم الفاتورة: يُحفظ رقماً إن كُتبت له قيمة، وإلا يُحذف (القيمة الخاطئة تبقى ليُنبَّه عليها)
+    if ((d.discMode === 'pct' || d.discMode === 'amt') && String(d.discVal ?? '').trim() !== '' && num(d.discVal) !== 0) { doc.discMode = d.discMode; doc.discVal = num(d.discVal); } else { delete doc.discMode; delete doc.discVal; }
     if (hasPay) {
       const total = calcDoc(doc, dec()).total;
       if (pay === '*') {
@@ -515,6 +545,15 @@ export function form(type, { root, params, query }) {
     if (!Object.keys(errs).length && s.negativeStock === 'block') {
       for (const sh of stockShortages(db, store.getBooks(), doc, existing)) {
         doc.lines.forEach((l, i) => { if (l.product === sh.product) errs['qty' + i] = `المتوفر ${sh.have} فقط، والبرنامج مضبوط على منع البيع بأكثر من المخزون`; });
+      }
+    }
+    // حد دين العميل: تنبيه أو منع حسب الإعدادات، وفقط حين تزيد هذه الفاتورة دينه فيتجاوز حده
+    if (!Object.keys(errs).length) {
+      const cc = creditCheck(db, store.getBooks(), doc, existing);
+      if (cc) {
+        const msg = `هذه الفاتورة تجعل رصيد العميل ${moneyText(cc.after)} وحدّ دينه ${moneyText(cc.limit)} (زيادة ${moneyText(cc.over)}).`;
+        if (s.creditPolicy === 'block') errs.party = `${msg} البرنامج مضبوط على منع تجاوز الحد: اقبض جزءاً من المبلغ أو ارفع حد العميل من بطاقته.`;
+        else if (!(await confirmBox(`${msg} هل تريد المتابعة؟`, { ok: 'متابعة الحفظ', title: 'تجاوز حد الدين' }))) return;
       }
     }
     if (!showErrors(root, errs)) { toast('راجع الحقول المظللة باللون الأحمر', 'err'); return; }
@@ -547,7 +586,7 @@ export function show(type, { root, params, query }) {
   const party = store.findParty(d.party);
   const t = B.totals.get(d.id) || calcDoc(d, dec());
   const st = docStatus(d, B);
-  const size = s.printSize === 'receipt' && (type === 'sale' || type === 'sreturn') ? 'receipt' : 'a4';
+  const size = (s.printSize === 'receipt' || s.printSize === 'receipt58') && (type === 'sale' || type === 'sreturn') ? s.printSize : 'a4';
   const locked = docLocked(d);
 
   const returns = store.getDb().docs.filter((x) => x.refId === d.id);

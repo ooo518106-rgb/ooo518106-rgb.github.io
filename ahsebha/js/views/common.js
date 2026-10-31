@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
 import {
-  docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, ymd, monthStart, monthEnd, addMonths, addDays,
+  docNo, calcDoc, expenseAsDoc, moneyAccounts, currencyInfo, num, round, ymd, monthStart, monthEnd, addMonths, addDays,
   quarterStart, fiscalYearStart, zatcaInvoiceQR, tafqeet, sortedAccounts, paymentList, TAX_CATS, DOC_TYPES, NO_POSTING, isPdc,
 } from '../core.js';
 import { html, raw, money, qty, fmtDate, hijri, modal, showErrors, $, printHTML, qrSVG, moneyText, field } from '../ui.js';
@@ -252,7 +252,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const party = store.findParty(d.party);
   const [title, en] = paperTitle(d, party, s);
   const tax = !!s.vat || num(d.vatRate) > 0;
-  const small = size === 'receipt';
+  const small = size === 'receipt' || size === 'receipt58';
   const bi = bilingual(s);
   const L = (ar, enLabel) => lbl(ar, enLabel, bi);
   const anyDisc = T.lines.some((l) => l.discount);
@@ -293,7 +293,7 @@ export function docPaper(d, { size = 'a4' } = {}) {
   const note = [d.notes, isSale ? s.invoiceNote : ''].filter(Boolean).join('\n');
   // نسخة العرض: علامة مائية وتذييل يمنعان استعمال الفاتورة فعلياً (تظهر على الشاشة وفي الطباعة)
   const dm = demoState();
-  return html`<div class="paper ${small ? 'receipt' : ''} ${bi ? 'bi' : ''} ${dm ? 'is-demo' : ''}">
+  return html`<div class="paper ${small ? 'receipt' : ''} ${size === 'receipt58' ? 'r58' : ''} ${bi ? 'bi' : ''} ${dm ? 'is-demo' : ''}">
     ${dm ? html`<div class="demo-mark" aria-hidden="true"><span>نسخة تجريبية</span></div>` : ''}
     <div class="pp-head">${coBlock(s, bi)}<div class="pp-title"><h1>${title}</h1><div class="en">${en}</div></div></div>
     <div class="pp-meta">
@@ -313,7 +313,9 @@ export function docPaper(d, { size = 'a4' } = {}) {
       <div>${qr ? html`<div class="pp-qr">${raw(qr)}<div class="muted small">رمز الاستجابة السريعة للفاتورة وفق متطلبات هيئة الزكاة والضريبة والجمارك</div></div>` : ''}
         ${note ? html`<div class="pp-note">${note}</div>` : ''}</div>
       <div><div class="pp-totals">
-        ${anyDisc ? html`<div><span>${L('المجموع قبل الخصم', 'Subtotal')}</span>${money(T.gross)}</div><div><span>${L('الخصم', 'Discount')}</span>${money(T.discount)}</div>` : ''}
+        ${anyDisc || T.docDiscount ? html`<div><span>${L('المجموع قبل الخصم', 'Subtotal')}</span>${money(T.gross)}</div>` : ''}
+        ${anyDisc ? html`<div><span>${L('الخصم', 'Discount')}</span>${money(T.discount)}</div>` : ''}
+        ${T.docDiscount ? html`<div><span>${L('خصم على الفاتورة', 'Invoice discount')}${d.discMode === 'pct' ? ` (${round(num(d.discVal), 2)}%)` : ''}</span>${money(T.docDiscount)}</div>` : ''}
         ${tax ? html`<div><span>${L('الإجمالي غير شامل الضريبة', `Total excl. ${taxEn(s)}`)}</span>${money(T.net)}</div><div><span>${L(`${s.taxLabel || 'الضريبة'}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`, `${taxEn(s)}${num(d.vatRate) ? ` (${num(d.vatRate)}%)` : ''}`)}</span>${money(T.vat)}</div>` : ''}
         <div class="grand"><span>${tax ? L('الإجمالي شامل الضريبة', `Total incl. ${taxEn(s)}`) : L('الإجمالي', 'Total')}</span><span>${money(T.total)} ${currencyInfo(s.currency).sym}</span></div>
         ${showPays ? html`${pays.map((p) => html`<div><span>${accName(p.acc)}</span>${money(p.amount)}</div>`)}
