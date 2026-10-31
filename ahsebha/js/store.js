@@ -285,6 +285,7 @@ export function normalize(d) {
     assets: arr(d.assets).filter((a) => typeof a.name === 'string'),
     employees: arr(d.employees).filter((x) => typeof x.name === 'string'),
     warehouses: arr(d.warehouses).filter((x) => typeof x.name === 'string'),
+    priceLists: arr(d.priceLists).filter((x) => typeof x.name === 'string' && typeof x.id === 'string'),
     centers: arr(d.centers).filter((x) => typeof x.name === 'string'),
     recons: arr(d.recons).filter((x) => typeof x.account === 'string'),
     recurring: arr(d.recurring).filter((r) => isObj(r.src) && typeof r.src.type === 'string'),
@@ -659,6 +660,26 @@ export function listItemUsage(kind, id) {
 export function deleteListItem(kind, id) {
   if (listItemUsage(kind, id)) throw new Error('لا يمكن الحذف: مستخدم في مستندات. يمكنك إعادة تسميته');
   mutate((d) => { d[kind] = d[kind].filter((x) => x.id !== id); });
+}
+
+// ─── قوائم الأسعار (لكل عميل قائمة، ولكل منتج سعر خاص بها اختيارياً في product.listPrices) ───
+export const findPriceList = (id) => (db && id ? db.priceLists.find((x) => x.id === id) || null : null);
+export function savePriceList(l) {
+  mutate((d) => {
+    const i = l.id ? d.priceLists.findIndex((x) => x.id === l.id) : -1;
+    if (i >= 0) d.priceLists[i] = { ...d.priceLists[i], ...l };
+    else { l.id = 'pl' + newId(); d.priceLists.push(l); }
+  });
+  return l;
+}
+export const priceListUsage = (id) => db.parties.filter((p) => p.priceList === id).length;
+// الحذف يفك ارتباط العملاء ويمسح أسعار المنتجات الخاصة بالقائمة، والفواتير القديمة تبقى بأسعارها
+export function deletePriceList(id) {
+  mutate((d) => {
+    d.priceLists = d.priceLists.filter((x) => x.id !== id);
+    for (const p of d.parties) if (p.priceList === id) p.priceList = '';
+    for (const p of d.products) if (p.listPrices && id in p.listPrices) { const rest = { ...p.listPrices }; delete rest[id]; p.listPrices = rest; }
+  });
 }
 
 // ─── مطابقة البنك ───

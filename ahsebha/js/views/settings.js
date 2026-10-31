@@ -6,11 +6,14 @@ import { go, guard, setTitle } from '../nav.js';
 import { head, S, ssName } from './common.js';
 import { downloadBackup, downloadFullBackup, downloadEncryptedBackup, restoreFile, loadDemo } from './home.js';
 import { can } from '../auth.js';
+import { has } from '../license.js';
+import { requireFeature } from './subscription.js';
 
 export function view({ root }) {
   setTitle('الإعدادات');
   const db = store.getDb();
   const s = { ...S() };
+  const plPct = (p) => `${num(p) > 0 ? '+' : ''}${num(p)}%`;
   const opt = (v, cur, label) => html`<option value="${v}" ${String(v) === String(cur) ? raw('selected') : ''}>${label}</option>`;
   const inp = (k, attrs = '') => html`<input class="inp" name="${k}" data-f="${k}" value="${s[k] ?? ''}" ${raw(attrs)}>`;
 
@@ -86,6 +89,11 @@ export function view({ root }) {
           <button type="button" class="btn btn-ghost btn-sm" data-add="centers" style="margin-top:8px">➕ فرع</button></div>
       </div>
       <p class="muted small" style="margin-top:10px">المستودعات تتابع كمية كل صنف في كل مكان مع تحويلات بينها. الفروع (مراكز التكلفة) تُختار في الفواتير والمصروفات والرواتب، وتظهر قائمة الدخل لكل فرع.</p></div>
+
+    <div class="card" style="margin-top:14px" data-pl-card><div class="card-h"><h3>🏷️ قوائم الأسعار</h3><span class="muted small">أسعار مختلفة لكل عميل</span></div>
+      ${db.priceLists.length ? html`<div class="list-mini">${db.priceLists.map((l) => html`<div class="it"><span>${l.name} <span class="badge badge-info" dir="ltr">${plPct(l.pct)}</span> <small class="muted">${store.priceListUsage(l.id)} عميل</small></span><span class="inline"><button type="button" class="btn btn-ghost btn-sm" data-pl-edit="${l.id}" aria-label="تعديل ${l.name}">✏️</button><button type="button" class="btn btn-ghost btn-sm" data-pl-del="${l.id}" aria-label="حذف ${l.name}">🗑</button></span></div>`)}</div>` : html`<p class="muted small">لا توجد قوائم بعد. مثال: «جملة» بخصم 10٪ عن سعر البيع، و«VIP» بخصم 15٪.</p>`}
+      <button type="button" class="btn btn-ghost btn-sm" data-pl-add style="margin-top:8px">➕ قائمة أسعار</button>
+      <p class="muted small" style="margin-top:10px">لكل قائمة نسبة على سعر البيع (السالب خصم). اربط العميل بقائمته من بطاقته فتنطبق أسعارها تلقائياً بالفواتير والكاشير، ولأي منتج سعر خاص بالقائمة من صفحة المنتج. الفواتير القديمة تبقى بأسعارها.</p></div>
 
     <div class="card" style="margin-top:14px"><div class="card-h"><h3>💼 الرواتب و${ssName()}</h3><span class="muted small">${s.payroll ? 'نسب معدّلة' : 'النسب الافتراضية للدولة'}</span></div>
       <form class="form-grid" data-payroll novalidate>
@@ -231,7 +239,46 @@ export function view({ root }) {
     body: html`<form novalidate>${field('الاسم', html`<input class="inp" name="n" value="${value}" autofocus>`)}<div class="dlg-actions"><button class="btn btn-primary">حفظ</button></div></form>`,
     onMount: (dlg, done) => { const f = $('form', dlg); f.onsubmit = (e) => { e.preventDefault(); if (f.n.value.trim()) done(f.n.value.trim()); }; },
   });
+  // قوائم الأسعار: الاسم ونسبة التعديل على سعر البيع
+  const plDialog = (l = null) => modal({
+    title: l ? 'تعديل قائمة الأسعار' : 'قائمة أسعار جديدة',
+    body: html`<form novalidate class="form-grid">
+      ${field('اسم القائمة', html`<input class="inp" name="n" value="${l ? l.name : ''}" placeholder="جملة" autofocus>`)}
+      ${field('نسبة التعديل على سعر البيع ٪', html`<input class="inp" name="pct" type="text" inputmode="decimal" data-num dir="ltr" value="${l ? l.pct : ''}" placeholder="-10">`, { hint: 'اكتب -10 لخصم 10٪ أو 15 لزيادة 15٪. اتركه فارغاً لتبقى الأسعار كما هي مع أسعار خاصة بالمنتجات' })}
+      <div class="dlg-actions span-all"><button class="btn btn-primary">حفظ</button><button type="button" class="btn btn-ghost" data-no>إلغاء</button></div></form>`,
+    onMount: (dlg, done) => {
+      const f = $('form', dlg);
+      $('[data-no]', dlg).onclick = () => done(null);
+      f.onsubmit = (e) => {
+        e.preventDefault();
+        const name = f.n.value.trim();
+        if (!name) { toast('اكتب اسم القائمة', 'err'); return; }
+        if (store.getDb().priceLists.some((x) => x.id !== (l && l.id) && x.name === name)) { toast('يوجد قائمة بنفس الاسم', 'err'); return; }
+        if (num(f.pct.value) <= -100) { toast('النسبة لا تقل عن -100', 'err'); return; }
+        done({ name, pct: num(f.pct.value) });
+      };
+    },
+  });
   root.addEventListener('click', async (e) => {
+    const plAdd = e.target.closest('[data-pl-add]');
+    const plEdit = e.target.closest('[data-pl-edit]');
+    const plDel = e.target.closest('[data-pl-del]');
+    if (plAdd || plEdit || plDel) {
+      if (!has('pricelists')) { await requireFeature('pricelists'); return; }
+      if (plDel) {
+        const l = store.findPriceList(plDel.dataset.plDel);
+        const n = store.priceListUsage(l.id);
+        if (!(await confirmBox(`حذف قائمة «${l.name}»؟${n ? ` سيعود ${n} عميل لسعر البيع العادي، وتُحذف أسعارها الخاصة بالمنتجات.` : ''} الفواتير القديمة تبقى بأسعارها.`, { ok: 'حذف', danger: true }))) return;
+        store.deletePriceList(l.id); toast('تم الحذف'); go('#/settings');
+        return;
+      }
+      const cur = plEdit ? store.findPriceList(plEdit.dataset.plEdit) : null;
+      const r = await plDialog(cur);
+      if (!r) return;
+      store.savePriceList(cur ? { id: cur.id, ...r } : r);
+      toast('تم الحفظ ✓'); go('#/settings');
+      return;
+    }
     const add = e.target.closest('[data-add]');
     const ren = e.target.closest('[data-rename]');
     const rm = e.target.closest('[data-remove]');

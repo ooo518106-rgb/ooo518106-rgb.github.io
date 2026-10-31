@@ -1,6 +1,6 @@
 // ═══ المنتجات والخدمات، بطاقة الصنف، وتسويات المخزون (الجرد) ═══
 import * as store from '../store.js';
-import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor } from '../core.js';
+import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor, listPrice } from '../core.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
 import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel } from './common.js';
@@ -92,6 +92,8 @@ export function productForm({ root, params, query = {} }) {
       <div class="card"><div class="card-h"><h3>📦 وحدات بيع إضافية</h3><span class="muted small">مثل: كرتون = 12 من الوحدة الأساسية، بسعره وباركوده</span></div>
         <div data-units></div><small class="fld-e" data-err="units" hidden></small>
         <button type="button" class="btn btn-ghost btn-sm" data-unit-add style="margin-top:8px">➕ إضافة وحدة</button></div>
+      ${store.getDb().priceLists.length ? html`<div class="card"><div class="card-h"><h3>🏷️ أسعار قوائم الأسعار</h3><span class="muted small">اتركه فارغاً ليتبع نسبة القائمة</span></div>
+        <div class="form-grid">${store.getDb().priceLists.map((l) => field(`سعر «${l.name}»`, html`<input class="inp" data-lp="${l.id}" type="text" inputmode="decimal" data-num autocomplete="off" value="${p.listPrices && p.listPrices[l.id] != null ? p.listPrices[l.id] : ''}" placeholder="${num(p.price) ? listPrice(store.getDb(), { price: p.price }, l.id) : 'تلقائي'}" aria-label="سعر قائمة ${l.name}">`))}</div></div>` : ''}
       <div class="card" data-stock-box><div class="card-h"><h3>المخزون</h3></div><div class="form-grid">
         ${field('الكمية الافتتاحية', inp('openQty', 'type="text" inputmode="decimal" data-num autocomplete="off"'), { hint: `الموجودة عندك في ${s.startDate ? fmtDate(s.startDate) : 'بداية التشغيل'}` })}
         ${field('تكلفة الوحدة الافتتاحية', inp('openCost', numAttrs))}
@@ -121,7 +123,7 @@ export function productForm({ root, params, query = {} }) {
     const del = e.target.closest('[data-unit-del]');
     if (del) { p.units.splice(Number(del.dataset.unitDel), 1); drawUnits(); guard.dirty = true; }
   });
-  root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k && k !== 'active') { p[k] = e.target.value; guard.dirty = true; } });
+  root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k && k !== 'active') { p[k] = e.target.value; guard.dirty = true; } else if (e.target.dataset.lp) guard.dirty = true; });
   root.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
     if (k === 'active') p.active = e.target.checked;
@@ -159,6 +161,9 @@ export function productForm({ root, params, query = {} }) {
     p.units = units;
     const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S',
       nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim() };
+    // أسعار القوائم: ما كُتب فقط، والفارغ يتبع نسبة القائمة
+    out.listPrices = {};
+    for (const el of $$('[data-lp]', root)) if (String(el.value).trim() !== '' && num(el.value) >= 0) out.listPrices[el.dataset.lp] = num(el.value);
     const saved = store.saveProduct(out);
     guard.dirty = false;
     toast('تم الحفظ ✓');

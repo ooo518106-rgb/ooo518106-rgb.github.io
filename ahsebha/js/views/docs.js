@@ -1,7 +1,7 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
@@ -13,7 +13,7 @@ import { repeatDialog } from './recurring.js';
 import { scanForPurchase, takeDraft, receiptCheck } from './scan.js';
 import { bindFiles, bindDocFiles } from './attach.js';
 import { handleDemoError } from './subscription.js';
-import { demo as demoState } from '../license.js';
+import { demo as demoState, has as hasFeature } from '../license.js';
 
 const CFG = {
   sale: { icon: '🧾', kind: 'customer', priceKey: 'price', newLabel: 'فاتورة جديدة', payLabel: 'طريقة الدفع', credit: 'آجل على العميل', paidLabel: 'المبلغ المدفوع' },
@@ -203,7 +203,19 @@ export function form(type, { root, params, query }) {
   function lineFromProduct(p) {
     // نفس showTax، لكن هذه الدالة تُستدعى من «بيع/شراء» في صفحة المنتج قبل تعريفه
     const taxed = !!s.vat || num(d.vatRate) > 0;
-    return { product: p.id, desc: p.name, qty: 1, price: num(p[C.priceKey]) || '', disc: '', tax: taxed ? (p.tax || 'S') : 'S' };
+    const lid = listId();
+    return { product: p.id, desc: p.name, qty: 1, price: (lid ? listPrice(db, p, lid) : num(p[C.priceKey])) || '', disc: '', tax: taxed ? (p.tax || 'S') : 'S' };
+  }
+  // قائمة أسعار العميل (للمبيعات فقط، وهي من الميزات): تحدد سعر المنتج عند إضافته للفاتورة
+  // (دوال لا ثوابت: تُستدعى من lineFromProduct قبل وصول التنفيذ إلى هنا عند الفتح من صفحة المنتج)
+  function listId() {
+    if (C.priceKey !== 'price' || !hasFeature('pricelists')) return '';
+    const l = store.findPriceList((store.findParty(d.party) || {}).priceList);
+    return l ? l.id : '';
+  }
+  // السعر الأساسي بلا قائمة، بنفس قاعدة الوحدات المعتمدة في الفاتورة
+  function plainPrice(p, u) {
+    return u ? (C.priceKey === 'price' && num(u.price) ? num(u.price) : round(num(p[C.priceKey]) * num(u.factor), 4)) : num(p[C.priceKey]);
   }
   const calc = () => calcDoc(d, dec());
 
@@ -380,10 +392,29 @@ export function form(type, { root, params, query }) {
     const p = store.findParty(d.party);
     if (!p) { box.textContent = ''; return; }
     const bal = store.getBooks().partyBalance.get(p.id) || 0;
-    box.innerHTML = String(html`الرصيد الحالي: ${money(bal, { sym: true })}${type === 'sale' && num(p.creditLimit) > 0 ? html` · حد الدين: ${money(p.creditLimit, { sym: true })}` : ''}${p.vatNo ? html` · ضريبي: <span dir="ltr">${p.vatNo}</span>` : ''}`);
+    box.innerHTML = String(html`الرصيد الحالي: ${money(bal, { sym: true })}${type === 'sale' && num(p.creditLimit) > 0 ? html` · حد الدين: ${money(p.creditLimit, { sym: true })}` : ''}${listId() ? html` · قائمة الأسعار: ${store.findPriceList(listId()).name}` : ''}${p.vatNo ? html` · ضريبي: <span dir="ltr">${p.vatNo}</span>` : ''}`);
   }
 
   const dirty = () => { guard.dirty = true; };
+
+  // اختيار عميل بقائمة أسعار مختلفة: نعرض تطبيقها على البنود الموجودة (ويعود السعر العادي إن لم يكن له قائمة)
+  async function offerReprice() {
+    if (C.priceKey !== 'price' || d.refId || !hasFeature('pricelists')) return;
+    const lid = listId();
+    const rows = [];
+    for (const l of d.lines) {
+      const p = l.product ? store.findProduct(l.product) : null;
+      if (!p) continue;
+      const u = l.unit && num(l.factor) > 1 ? (unitsOf(p) || []).find((x) => x.name === l.unit) || null : null;
+      const price = lid ? listPrice(db, p, lid, u) : plainPrice(p, u);
+      if (num(l.price) !== price) rows.push({ l, price });
+    }
+    if (!rows.length) return;
+    const name = lid ? store.findPriceList(lid).name : 'سعر البيع العادي';
+    if (!(await confirmBox(`تطبيق «${name}» على بنود الفاتورة؟ سيتغير سعر ${rows.length} بنداً.`, { ok: 'طبّق الأسعار', title: 'قائمة أسعار العميل' }))) return;
+    for (const { l, price } of rows) l.price = price;
+    dirty(); drawLines();
+  }
 
   // ── ربط الأحداث ──
   combo($('[data-party]', root), {
@@ -395,6 +426,7 @@ export function form(type, { root, params, query }) {
       if (type === 'purchase' && !existing && pay === 'cash' && paidAuto) pay = '';
       partyInfo(); dirty(); drawTotals();
       if (C.ref) $('[data-ref]', root).innerHTML = String(refOptions());
+      offerReprice();
     },
     onCreate: (text) => quickParty(C.kind, text),
     createLabel: C.kind === 'customer' ? 'عميل جديد' : 'مورد جديد',
@@ -448,8 +480,9 @@ export function form(type, { root, params, query }) {
       const u = (unitsOf(p) || []).find((x) => x.name === el.value);
       if (!p || !u) return;
       const f = num(u.factor);
-      if (f === 1) { delete l.unit; delete l.factor; l.price = num(p[C.priceKey]) || l.price; }
-      else { l.unit = u.name; l.factor = f; l.price = C.priceKey === 'price' && num(u.price) ? num(u.price) : round(num(p[C.priceKey]) * f, 4); }
+      const lid = listId();
+      if (f === 1) { delete l.unit; delete l.factor; l.price = (lid ? listPrice(db, p, lid) : num(p[C.priceKey])) || l.price; }
+      else { l.unit = u.name; l.factor = f; l.price = lid ? listPrice(db, p, lid, u) : plainPrice(p, u); }
       dirty(); drawLines();
     }
     if (el.dataset.k === 'inclusive') { d.inclusive = el.checked; dirty(); drawLines(); }
@@ -611,7 +644,7 @@ export function show(type, { root, params, query }) {
         ${type === 'sale' || type === 'sorder' ? html`<button class="btn btn-ghost" data-delivery>🚚 سند تسليم</button>` : ''}
         ${type === 'sale' || type === 'purchase' ? html`<button class="btn btn-ghost" data-repeat>♻️ تكرار</button>` : ''}
         ${retHref && !cancelledBy ? html`<a class="btn btn-ghost" href="${retHref}">${type === 'sale' ? '↩️' : '↪️'} مرتجع</a>` : ''}
-        ${C.kind === 'customer' || type === 'porder' ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button>` : ''}
+        ${C.kind === 'customer' || type === 'porder' ? html`<button class="btn btn-ghost" data-wa>💬 واتساب</button><button class="btn btn-ghost" data-mail>✉️ بريد</button>` : ''}
         <a class="btn btn-ghost" href="#/${SEG[type]}/new?copy=${d.id}">📄 نسخ</a>
         ${type === 'sale' && !cancelledBy && !locked ? html`<button class="btn btn-ghost" data-cancel>🚫 إلغاء الفاتورة</button>` : ''}
         ${locked ? '' : html`${cancelledBy ? '' : html`<a class="btn btn-ghost" href="#/${SEG[type]}/${d.id}/edit">✏️ تعديل</a>`}
@@ -662,6 +695,17 @@ export function show(type, { root, params, query }) {
     lines.push('', `مع تحيات ${s.name || ''}`);
     if (demoState()) lines.push(`(نسخة تجريبية من برنامج ${BRAND.name})`); // كما على الورقة المطبوعة
     window.open(waLink(party && party.phone, lines.filter((x) => x !== '').join('\n')), '_blank', 'noopener');
+  };
+  // البريد: برنامج البريد على الجهاز يفتح برسالة جاهزة بملخص المستند (المتصفح لا يرفق ملفاً، فيُرفق PDF من زر الطباعة)
+  const mail = $('[data-mail]', root);
+  if (mail) mail.onclick = () => {
+    const lines = [`السادة ${party ? party.name : ''}`, '', `${T.name} رقم ${no} بتاريخ ${fmtDate(d.date)}`, `الإجمالي: ${moneyText(t.total)}`];
+    if (st && st.due > 0) lines.push(`المتبقي: ${moneyText(st.due)}`);
+    if (d.dueDate && st && st.due > 0) lines.push(`تاريخ الاستحقاق: ${fmtDate(d.dueDate)}`);
+    lines.push('', 'مرفق ملف الفاتورة (PDF).', '', `مع تحيات ${s.name || ''}`);
+    if (demoState()) lines.push(`(نسخة تجريبية من برنامج ${BRAND.name})`);
+    location.href = `mailto:${party && party.email ? party.email : ''}?subject=${encodeURIComponent(`${T.name} ${no} — ${s.name || ''}`)}&body=${encodeURIComponent(lines.join('\n'))}`;
+    toast('افتح زر «طباعة / PDF» واحفظ الملف لإرفاقه بالرسالة');
   };
   const del = $('[data-del]', root);
   if (del) del.onclick = async () => {
