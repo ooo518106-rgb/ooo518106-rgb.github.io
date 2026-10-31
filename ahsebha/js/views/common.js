@@ -59,6 +59,14 @@ export function ccField(d) {
 }
 export const accName = (id) => store.findAccount(id)?.name || 'حساب محذوف';
 
+// ─── الدفعات: نص الدفعة في القوائم، وما سحبه أو أدخله بند المستند (من الدفاتر) ───
+export const lotText = (c) => `${c.lot || 'بدون رقم'}${c.exp ? ' — ينتهي ' + fmtDate(c.exp) : ''}${c.qty != null ? ' — المتوفر ' + qty(c.qty) : ''}`;
+// دفعات بند مستند كنص قصير («دفعة A12 · ينتهي 2027-03-01»)، وفارغ إن لم تكن للمنتج دفعات
+export function lineLots(B, d, i) {
+  const ps = (B.lotAlloc && B.lotAlloc.get(`${d.id}:${i}`)) || [];
+  return ps.filter((x) => x.lot || x.exp).map((x) => `${x.lot ? 'دفعة ' + x.lot : 'دفعة'}${x.exp ? ' · ينتهي ' + fmtDate(x.exp) : ''}`).join('، ');
+}
+
 // ─── مصطلحات تختلف حسب الدولة ───
 const isJO = () => store.getDb()?.settings?.country === 'JO';
 // الأردن: «الضمان الاجتماعي»؛ الخليج: «التأمينات الاجتماعية»
@@ -274,7 +282,8 @@ export function docPaper(d, { size = 'a4' } = {}) {
     const X = T.lines[i];
     const p = l.product ? store.findProduct(l.product) : null;
     const nm = l.desc || (p && p.name) || 'بند';
-    const name = bi && p && p.nameEn && p.nameEn !== nm ? html`${nm}<i class="pp-en"><span dir="ltr">${p.nameEn}</span></i>` : nm;
+    const lots = small ? '' : lineLots(store.getBooks(), d, i);
+    const name = html`${bi && p && p.nameEn && p.nameEn !== nm ? html`${nm}<i class="pp-en"><span dir="ltr">${p.nameEn}</span></i>` : nm}${lots ? html`<i class="pp-lot">${lots}</i>` : ''}`;
     const q = html`${qty(X.qty)}${l.unit ? html` <small class="muted">${l.unit}</small>` : ''}`;
     if (small) return html`<tr><td>${name}</td><td class="num">${q}</td><td class="num">${money(X.price)}</td><td class="num">${money(X.total)}</td></tr>`;
     return html`<tr><td class="c-n">${i + 1}</td><td>${name}</td><td class="num">${q}</td><td class="num">${money(X.price)}</td>

@@ -1,9 +1,12 @@
 // ═══ المنتجات والخدمات، بطاقة الصنف، وتسويات المخزون (الجرد) ═══
 import * as store from '../store.js';
-import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor, listPrice } from '../core.js';
+import { docNo, DOC_TYPES, num, round, validateDoc, lineFactor, listPrice, isDate, isLotTracked, lotChoices, MAIN_WH } from '../core.js';
+import { has } from '../license.js';
+import { requireFeature } from './subscription.js';
+import { report as lotsReport, daysText } from './lots.js';
 import { html, raw, money, qty, fmtDate, toast, confirmBox, combo, showErrors, empty, norm, $, $$, exportTable, field, attr } from '../ui.js';
 import { go, guard, setTitle, docHref } from '../nav.js';
-import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel } from './common.js';
+import { head, bindRows, today, S, dec, taxLabel, taxOptions, productItems, periodOf, periodBar, bindPeriod, inPeriod, entryTable, csvName, printPaper, cameraDialog, docLocked, lockedNote, lockedPage, whField, defaultWh, whLabel, lotText, lineLots } from './common.js';
 import { makeStoreBarcode, isEan13, code128Supported, barcodeSVG } from '../barcode.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -45,7 +48,7 @@ export function productList({ root, query }) {
     out.innerHTML = String(html`<div class="sum-bar"><span>العدد: <b>${rows.length}</b></span><span>قيمة المخزون بالتكلفة: <b>${money(value, { sym: true })}</b></span></div>
       ${rows.length ? html`<div class="tbl-wrap"><table class="tbl" data-table><thead><tr><th>الصنف</th><th class="hide-sm">الباركود / الرمز</th><th class="num">سعر البيع</th><th class="num hide-sm">متوسط التكلفة</th><th class="num">الكمية</th><th class="num hide-sm">القيمة</th></tr></thead>
       <tbody>${rows.slice(0, limit).map((p) => { const s = stockOf(p.id); const low = p.type === 'stock' && num(p.reorder) > 0 && s.qty <= num(p.reorder);
-        return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
+        return html`<tr data-href="#/products/${p.id}"><td><b>${p.name}</b>${p.type === 'service' ? html` <span class="badge badge-info">خدمة</span>` : ''}${isLotTracked(p) ? html` <span class="badge badge-info">دفعات</span>` : ''}${p.active === false ? html` <span class="badge badge-muted">موقوف</span>` : ''}</td>
           <td class="hide-sm code" dir="ltr">${p.barcode || p.sku || ''}</td><td class="num">${money(p.price)}</td><td class="num hide-sm">${p.type === 'stock' ? money(avgCost(p)) : '—'}</td>
           <td class="num">${p.type === 'stock' ? html`<span class="${s.qty < 0 ? 'neg' : low ? 'neg' : ''}">${qty(s.qty)}</span>${low ? html` <span class="badge badge-bad">نفاد</span>` : ''}` : '—'}</td>
           <td class="num hide-sm">${p.type === 'stock' ? money(s.value) : '—'}</td></tr>`; })}</tbody></table></div>
@@ -67,7 +70,7 @@ export function productForm({ root, params, query = {} }) {
   const s = S();
   const existing = params.id ? store.findProduct(params.id) : null;
   if (params.id && !existing) { root.innerHTML = String(empty('🔎', 'المنتج غير موجود')); return; }
-  const p = existing ? { ...existing } : { name: '', nameEn: '', sku: '', barcode: String(query.barcode || '').trim(), category: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true };
+  const p = existing ? { ...existing } : { name: '', nameEn: '', sku: '', barcode: String(query.barcode || '').trim(), category: '', type: 'stock', unit: '', price: '', cost: '', tax: 'S', openQty: '', openCost: '', reorder: '', notes: '', active: true, track: '', openLots: [] };
   const cats = [...new Set(store.getDb().products.map((x) => x.category).filter(Boolean))];
   const title = existing ? `تعديل: ${existing.name}` : 'منتج أو خدمة جديدة';
   setTitle(title);
@@ -98,7 +101,13 @@ export function productForm({ root, params, query = {} }) {
         ${field('الكمية الافتتاحية', inp('openQty', 'type="text" inputmode="decimal" data-num autocomplete="off"'), { hint: `الموجودة عندك في ${s.startDate ? fmtDate(s.startDate) : 'بداية التشغيل'}` })}
         ${field('تكلفة الوحدة الافتتاحية', inp('openCost', numAttrs))}
         ${field('حد إعادة الطلب', inp('reorder', numAttrs), { hint: 'تنبيه عندما تصل الكمية لهذا الحد' })}
-      </div>${existing ? html`<p class="muted small" style="margin-top:10px">الكمية الحالية تُحسب من الحركات. لتصحيح الكمية بعد الجرد استخدم <a href="#/adjustments/new?product=${existing.id}">تسوية المخزون</a>.</p>` : ''}</div>
+        ${field('تتبع الدفعات', html`<select class="inp" data-k="track"><option value="" ${p.track === 'lot' ? '' : raw('selected')}>بدون تتبع</option><option value="lot" ${p.track === 'lot' ? raw('selected') : ''}>دفعات وتواريخ انتهاء</option></select>`, { hint: 'للأدوية والأغذية وكل ما له تاريخ انتهاء: يبيع الأقرب انتهاءً أولاً ولا يبيع المنتهي' })}
+      </div>
+      <div data-lots-box hidden style="margin-top:12px"><div class="card-h"><h3>⏳ دفعات الرصيد الافتتاحي</h3><span class="muted small" data-lots-sum></span></div>
+        <div data-lots></div><small class="fld-e" data-err="openLots" hidden></small>
+        <button type="button" class="btn btn-ghost btn-sm" data-lot-add style="margin-top:8px">➕ إضافة دفعة</button>
+        <p class="muted small" style="margin-top:8px">وزّع الكمية الافتتاحية على دفعاتها، وما لم تُوزّعه يُحسب «بلا دفعة» ويُباع أولاً. دفعات ما بعد الافتتاح تُكتب في فواتير الشراء.</p></div>
+      ${existing ? html`<p class="muted small" style="margin-top:10px">الكمية الحالية تُحسب من الحركات. لتصحيح الكمية بعد الجرد استخدم <a href="#/adjustments/new?product=${existing.id}">تسوية المخزون</a>.</p>` : ''}</div>
       <div class="card"><label class="check"><input type="checkbox" data-k="active" ${p.active !== false ? raw('checked') : ''}> نشط (يظهر في الفواتير)</label>
         <div style="margin-top:10px">${field('ملاحظات', html`<textarea class="inp" data-k="notes" rows="2">${p.notes || ''}</textarea>`)}</div></div>
       <div class="form-actions sticky-actions"><button class="btn btn-primary">💾 حفظ</button>${existing ? '' : html`<button type="button" class="btn btn-ghost" data-again>حفظ وإضافة آخر</button>`}</div>
@@ -117,6 +126,34 @@ export function productForm({ root, params, query = {} }) {
         <button type="button" class="icon-btn" data-unit-del="${i}" aria-label="حذف">✕</button></div>`)}</div>`) : String(html`<p class="muted small">لا توجد وحدات إضافية. الوحدة الأساسية: ${p.unit || 'حبة'}.</p>`);
   };
   drawUnits();
+  // دفعات الرصيد الافتتاحي (للمنتج المتتبَّع): رقم الدفعة وتاريخ انتهائها وكميتها
+  p.openLots = Array.isArray(p.openLots) ? p.openLots.map((x) => ({ ...x })) : [];
+  const lotSum = () => round(p.openLots.reduce((t, x) => t + Math.max(0, num(x.qty)), 0), 3);
+  const updLotSum = (q = p.openQty) => { const el = $('[data-lots-sum]', root); if (el) el.textContent = `الموزَّع ${lotSum()} من ${num(q)}`; };
+  const drawLots = () => {
+    const on = p.type === 'stock' && p.track === 'lot';
+    $('[data-lots-box]', root).hidden = !on;
+    if (!on) return;
+    $('[data-lots]', root).innerHTML = p.openLots.length ? String(html`<div class="lot-rows">
+      <div class="lot-row line-h"><span>رقم الدفعة</span><span>تاريخ الانتهاء</span><span>الكمية</span><span></span></div>
+      ${p.openLots.map((x, i) => html`<div class="lot-row" data-ol="${i}">
+        <input class="inp" data-olk="lot" value="${x.lot || ''}" placeholder="رقم الدفعة" dir="auto" aria-label="رقم الدفعة">
+        <input class="inp" data-olk="exp" type="date" value="${x.exp || ''}" aria-label="تاريخ الانتهاء">
+        <input class="inp" data-olk="qty" type="text" inputmode="decimal" data-num autocomplete="off" value="${x.qty ?? ''}" placeholder="0" aria-label="كمية الدفعة">
+        <button type="button" class="icon-btn" data-lot-del="${i}" aria-label="حذف الدفعة">✕</button></div>`)}</div>`) : String(html`<p class="muted small">لا توجد دفعات افتتاحية. الكمية الافتتاحية كلها «بلا دفعة».</p>`);
+    updLotSum();
+  };
+  drawLots();
+  root.addEventListener('input', (e) => {
+    const row = e.target.closest('[data-ol]');
+    if (row && e.target.dataset.olk) { p.openLots[Number(row.dataset.ol)][e.target.dataset.olk] = e.target.value; guard.dirty = true; updLotSum(); }
+    else if (e.target.dataset.k === 'openQty') updLotSum(e.target.value);
+  });
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-lot-add]')) { p.openLots.push({ lot: '', exp: '', qty: '' }); drawLots(); $$('[data-ol] [data-olk="lot"]', root).pop()?.focus(); guard.dirty = true; }
+    const del = e.target.closest('[data-lot-del]');
+    if (del) { p.openLots.splice(Number(del.dataset.lotDel), 1); drawLots(); guard.dirty = true; }
+  });
   root.addEventListener('input', (e) => { const row = e.target.closest('[data-u]'); if (row && e.target.dataset.uk) { p.units[Number(row.dataset.u)][e.target.dataset.uk] = e.target.value; guard.dirty = true; } });
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-unit-add]')) { p.units.push({ name: '', factor: '', price: '', barcode: '' }); drawUnits(); $$('[data-u] [data-uk="name"]', root).pop()?.focus(); }
@@ -126,9 +163,12 @@ export function productForm({ root, params, query = {} }) {
   root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k && k !== 'active') { p[k] = e.target.value; guard.dirty = true; } else if (e.target.dataset.lp) guard.dirty = true; });
   root.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
+    // تتبع الدفعات من الميزات القابلة للبيع (المنتج الذي فُعّل تتبعه من قبل يبقى كما هو)
+    if (k === 'track' && e.target.value === 'lot' && !has('tracking') && !(existing && existing.track === 'lot')) { e.target.value = ''; p.track = ''; requireFeature('tracking'); return; }
     if (k === 'active') p.active = e.target.checked;
     else if (k) p[k] = e.target.value;
-    if (k === 'type') toggleStock();
+    if (k === 'type') { toggleStock(); drawLots(); }
+    if (k === 'track') drawLots();
     if (k === 'cost' && !num(p.openCost) && num(p.openQty)) { p.openCost = p.cost; const oc = $('[data-k="openCost"]', root); if (oc) oc.value = p.cost; }
     guard.dirty = true;
   });
@@ -148,6 +188,15 @@ export function productForm({ root, params, query = {} }) {
     if (p.barcode && !isEan13(p.barcode) && !code128Supported(p.barcode)) errs.barcode = 'الباركود أرقام وحروف لاتينية فقط';
     else if (p.barcode && store.getDb().products.some((x) => x.id !== p.id && x.barcode === p.barcode)) errs.barcode = 'الباركود مستخدم لمنتج آخر';
     if (num(p.openQty) && !num(p.openCost) && !num(p.cost)) errs.openCost = 'اكتب تكلفة الوحدة للكمية الافتتاحية';
+    const tracked = p.type === 'stock' && p.track === 'lot';
+    const lotRows = tracked ? p.openLots.filter((x) => String(x.lot || '').trim() || String(x.exp || '').trim() || String(x.qty ?? '').trim() !== '') : [];
+    for (const x of lotRows) {
+      if (!String(x.lot || '').trim() && !String(x.exp || '').trim()) { errs.openLots = 'لكل دفعة رقم أو تاريخ انتهاء'; break; }
+      if (String(x.exp || '').trim() && !isDate(x.exp)) { errs.openLots = 'تاريخ انتهاء غير صحيح'; break; }
+      if (!(num(x.qty) > 0)) { errs.openLots = 'اكتب كمية أكبر من صفر لكل دفعة'; break; }
+      if (String(x.lot || '').trim().length > 60) { errs.openLots = 'رقم الدفعة أطول من 60 حرفاً'; break; }
+    }
+    if (!errs.openLots && round(lotRows.reduce((t, x) => t + num(x.qty), 0), 3) > round(num(p.openQty), 3)) errs.openLots = 'مجموع كميات الدفعات أكبر من الكمية الافتتاحية';
     const units = p.units.filter((u) => String(u.name || '').trim() || num(u.factor)).map((u) => ({ name: String(u.name || '').trim(), factor: num(u.factor), price: u.price === '' || u.price == null ? '' : num(u.price), barcode: String(u.barcode || '').trim() }));
     const codes = new Set(store.getDb().products.filter((x) => x.id !== p.id).flatMap((x) => [x.barcode, ...(x.units || []).map((u) => u.barcode)]).filter(Boolean));
     if (p.barcode) codes.add(p.barcode);
@@ -160,7 +209,8 @@ export function productForm({ root, params, query = {} }) {
     if (!showErrors(root, errs)) return;
     p.units = units;
     const out = { ...p, price: num(p.price), cost: num(p.cost), openQty: p.type === 'stock' ? num(p.openQty) : 0, openCost: num(p.openCost) || num(p.cost), reorder: num(p.reorder), sku: String(p.sku || '').trim(), unit: String(p.unit || '').trim(), notes: String(p.notes || '').trim(), tax: p.tax || 'S',
-      nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim() };
+      nameEn: String(p.nameEn || '').trim(), category: String(p.category || '').trim(),
+      track: tracked ? 'lot' : '', openLots: lotRows.map((x) => ({ lot: String(x.lot || '').trim(), exp: String(x.exp || '').trim(), qty: num(x.qty) })) };
     // أسعار القوائم: ما كُتب فقط، والفارغ يتبع نسبة القائمة
     out.listPrices = {};
     for (const el of $$('[data-lp]', root)) if (String(el.value).trim() !== '' && num(el.value) >= 0) out.listPrices[el.dataset.lp] = num(el.value);
@@ -172,6 +222,17 @@ export function productForm({ root, params, query = {} }) {
   $('[data-form]', root).onsubmit = (e) => { e.preventDefault(); save(false); };
   const ag = $('[data-again]', root);
   if (ag) ag.onclick = () => save(true);
+}
+
+// دفعات المنتج الحالية في بطاقته: رقمها وتاريخ انتهائها وحالتها وكميتها
+function lotsCard(p) {
+  const rows = lotsReport().rows.filter((r) => r.product.id === p.id);
+  const multi = store.getDb().warehouses.length > 0;
+  const tone = { expired: ['منتهية', 'badge-bad'], soon: ['تنتهي قريباً', 'badge-warn'], ok: ['سليمة', 'badge-ok'], none: ['بلا دفعة', 'badge-muted'] };
+  return html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>⏳ الدفعات</h3><a class="btn btn-ghost btn-sm" href="#/lots">كل الدفعات</a></div>
+    ${rows.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>الدفعة</th><th>الانتهاء</th><th>الحالة</th>${multi ? html`<th class="hide-sm">المستودع</th>` : ''}<th class="num">الكمية</th></tr></thead><tbody>
+      ${rows.map((r) => html`<tr><td dir="auto">${r.lot || '—'}</td><td class="nowrap">${r.exp ? fmtDate(r.exp) : 'بلا تاريخ'}${r.days != null ? html`<small class="c-sub">${daysText(r)}</small>` : ''}</td><td><span class="badge ${tone[r.state][1]}">${tone[r.state][0]}</span></td>${multi ? html`<td class="hide-sm">${whLabel(r.wh) || 'الرئيسي'}</td>` : ''}<td class="num ${r.qty < 0 ? 'neg' : ''}">${qty(r.qty)} ${p.unit || ''}</td></tr>`)}</tbody></table></div>`
+      : html`<p class="muted">لا توجد دفعات فيها رصيد. اكتب رقم الدفعة وتاريخ انتهائها في فاتورة الشراء.</p>`}</div>`;
 }
 
 // ═══ بطاقة الصنف ═══
@@ -209,6 +270,7 @@ export function productShow({ root, params, query, path }) {
     ${p.barcode ? html`<div class="bc" style="margin-bottom:14px">${raw(barcodeSVG(p.barcode))}</div>` : ''}
     ${p.type === 'stock' && store.getDb().warehouses.length ? html`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🏬 الكمية في المستودعات</h3><a class="btn btn-ghost btn-sm" href="#/stock-transfers/new?product=${p.id}">🚚 تحويل</a></div><div class="list-mini">
       ${store.getDb().warehouses.map((w) => { const q = store.getBooks().whQty.get(p.id)?.get(w.id) || 0; return html`<div class="it"><span>${whLabel(w.id)}</span><b class="${q < 0 ? 'neg' : ''}">${qty(q)} ${p.unit || ''}</b></div>`; })}</div></div>` : ''}
+    ${isLotTracked(p) ? lotsCard(p) : ''}
     ${(p.units || []).length ? html`<p class="muted small" style="margin-bottom:12px">الوحدات: ${p.unit || 'حبة'} (${money(p.price)})${p.units.map((u) => ` · ${u.name} = ${u.factor} (${money(u.price !== '' && u.price != null ? u.price : u.factor * num(p.price))})`)}</p>` : ''}
     <div class="grid g4" style="margin-bottom:14px">
       ${p.type === 'stock' ? html`<div class="kpi"><span class="kpi-l">الكمية المتوفرة</span><span class="kpi-v ${st.qty < 0 || (num(p.reorder) && st.qty <= num(p.reorder)) ? 'neg' : ''}">${qty(st.qty)} <small class="cur">${p.unit || ''}</small></span>${num(p.reorder) ? html`<span class="kpi-s">حد الطلب ${num(p.reorder)}</span>` : ''}</div>
@@ -265,7 +327,25 @@ export function form(type, { root, params, query }) {
   if (existing && docLocked(existing)) { setTitle('تسوية مخزون'); root.innerHTML = String(lockedPage(existing)); return; }
   const d = existing ? clone(existing) : { type: 'adjust', date: today(), account: 'adj', notes: '', lines: [], ...(defaultWh() ? { wh: defaultWh() } : {}) };
   if (!existing && query.product) { const p = store.findProduct(query.product); if (p) d.lines.push({ product: p.id, qty: '', cost: '' }); }
+  // «تسوية المنتهي» من صفحة الدفعات: كل دفعة منتهية في هذا المستودع تُسحب بكاملها وتُقيَّد خسارة
+  if (!existing && query.expired) {
+    const wh = d.wh || MAIN_WH;
+    const gone = lotsReport().rows.filter((r) => r.state === 'expired' && r.qty > 0 && (store.getDb().warehouses.length ? r.wh === wh : true));
+    for (const r of gone) d.lines.push({ product: r.product.id, qty: -r.qty, cost: '', lot: r.lot, exp: r.exp });
+    if (gone.length) d.notes = 'إتلاف دفعات منتهية الصلاحية';
+  }
   if (!d.lines.length) d.lines.push({ product: null, qty: '', cost: '' });
+  const whKey = () => (store.getDb().warehouses.length ? (d.wh || MAIN_WH) : null);
+  // الدفعة في سطر التسوية: الزيادة تكتب دفعتها وتاريخها، والنقص يختار الدفعة المسحوبة (الأقرب انتهاءً افتراضياً، ويشمل المنتهية)
+  const lotCell = (l, i, p) => {
+    if (num(l.qty) < 0) {
+      const ch = lotChoices(store.getBooks(), p.id, whKey(), d.date, { expired: true });
+      const cur = l.lot || l.exp ? `${l.lot || ''}|${l.exp || ''}` : '';
+      const known = !cur || ch.some((c) => `${c.lot}|${c.exp}` === cur);
+      return html`<span class="lot-line"><select class="inp" data-lpick aria-label="الدفعة المسحوبة، بند ${i + 1}"><option value="">الدفعة: الأقرب انتهاءً تلقائياً</option>${known ? '' : html`<option value="${cur}" selected>${lotText({ lot: l.lot, exp: l.exp })}</option>`}${ch.map((c) => html`<option value="${c.lot}|${c.exp}" ${`${c.lot}|${c.exp}` === cur ? raw('selected') : ''}>${lotText(c)}</option>`)}</select></span>`;
+    }
+    return html`<span class="lot-line"><input class="inp lot-n" data-lk="lot" value="${l.lot || ''}" placeholder="رقم الدفعة (للزيادة)" dir="auto" aria-label="رقم الدفعة، بند ${i + 1}"><input class="inp lot-d" type="date" data-lk="exp" value="${l.exp || ''}" aria-label="تاريخ الانتهاء، بند ${i + 1}"></span><small class="fld-e" data-err="lot${i}" hidden></small><small class="fld-e" data-err="exp${i}" hidden></small>`;
+  };
   const title = existing ? `تعديل تسوية ${docNo(existing, s)}` : 'تسوية مخزون جديدة';
   setTitle(title);
   // الكمية الحالية قبل هذه التسوية (بإلغاء أثرها إن كانت قديمة)
@@ -298,35 +378,54 @@ export function form(type, { root, params, query }) {
           <div class="a-act" data-label="الفعلي بعد العد"><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-actual value="${p && l.qty !== '' ? round(cur + num(l.qty), 3) : ''}"></div>
           <div class="a-delta" data-label="الفرق (+ زيادة / − نقص)"><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-f="qty${i}" data-delta value="${l.qty}"></div>
           <div class="a-cost" data-label="تكلفة الوحدة (للزيادة)"><input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-cost value="${l.cost ?? ''}" placeholder="${p ? round(avgCost(p), dec()) : ''}"></div>
-          <div class="a-del"><button type="button" class="icon-btn" data-del aria-label="حذف">✕</button></div></div>`; })}
+          <div class="a-del"><button type="button" class="icon-btn" data-del aria-label="حذف">✕</button></div>
+          ${p && isLotTracked(p) ? html`<div class="a-lot" data-label="الدفعة">${lotCell(l, i, p)}</div>` : ''}</div>`; })}
     </div>`);
     $$('.adj-line[data-i]', box).forEach((row) => {
       const i = Number(row.dataset.i);
       combo($('[data-p]', row), {
         items: () => productItems('cost')().filter((it) => store.findProduct(it.value)?.type === 'stock'),
         onType: () => { d.lines[i].product = null; },
-        onPick: (it) => { d.lines[i].product = it.value; guard.dirty = true; draw(); $(`.adj-line[data-i="${i}"] [data-actual]`, box)?.focus(); },
+        onPick: (it) => { d.lines[i].product = it.value; delete d.lines[i].lot; delete d.lines[i].exp; guard.dirty = true; draw(); $(`.adj-line[data-i="${i}"] [data-actual]`, box)?.focus(); },
       });
     });
+  }
+  // الفرق إن غيّر إشارته تبدّل خلية الدفعة بين كتابة الدفعة (زيادة) واختيارها (نقص)
+  function refreshLot(tr, l, before) {
+    const cell = $('.a-lot', tr);
+    if (!cell || (num(before) < 0) === (num(l.qty) < 0)) return;
+    delete l.lot; delete l.exp;
+    cell.innerHTML = String(lotCell(l, Number(tr.dataset.i), store.findProduct(l.product)));
   }
   box.addEventListener('input', (e) => {
     const tr = e.target.closest('.adj-line[data-i]');
     if (!tr) return;
     const i = Number(tr.dataset.i);
     const l = d.lines[i];
+    const before = l.qty;
     guard.dirty = true;
     if (e.target.matches('[data-actual]')) {
       const cur = l.product ? current(l.product) : 0;
       l.qty = e.target.value === '' ? '' : round(num(e.target.value) - cur, 3);
       $('[data-delta]', tr).value = l.qty;
+      refreshLot(tr, l, before);
     } else if (e.target.matches('[data-delta]')) {
       l.qty = e.target.value;
       const cur = l.product ? current(l.product) : 0;
       $('[data-actual]', tr).value = e.target.value === '' ? '' : round(cur + num(e.target.value), 3);
+      refreshLot(tr, l, before);
     } else if (e.target.matches('[data-cost]')) l.cost = e.target.value;
+    else if (e.target.dataset.lk) l[e.target.dataset.lk] = e.target.value;
+  });
+  box.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-lpick]')) return;
+    const l = d.lines[Number(e.target.closest('.adj-line[data-i]').dataset.i)];
+    const [lot, exp] = e.target.value ? e.target.value.split('|') : ['', ''];
+    if (lot || exp) { l.lot = lot; l.exp = exp; } else { delete l.lot; delete l.exp; }
+    guard.dirty = true;
   });
   root.addEventListener('input', (e) => { const k = e.target.dataset.k; if (k) { d[k] = e.target.value; guard.dirty = true; } });
-  root.addEventListener('change', (e) => { const k = e.target.dataset.k; if (k) { d[k] = e.target.value; guard.dirty = true; } });
+  root.addEventListener('change', (e) => { const k = e.target.dataset.k; if (k) { d[k] = e.target.value; guard.dirty = true; if (k === 'wh') draw(); } });
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-add]')) { d.lines.push({ product: null, qty: '', cost: '' }); draw(); }
     const del = e.target.closest('[data-del]');
@@ -334,7 +433,8 @@ export function form(type, { root, params, query }) {
   });
   $('[data-form]', root).onsubmit = (e) => {
     e.preventDefault();
-    const doc = { ...d, notes: String(d.notes || '').trim(), lines: d.lines.filter((l) => l.product || l.qty !== '').map((l) => ({ product: l.product, qty: num(l.qty), cost: l.cost === '' || l.cost == null ? '' : num(l.cost) })) };
+    const doc = { ...d, notes: String(d.notes || '').trim(), lines: d.lines.filter((l) => l.product || l.qty !== '').map((l) => ({ product: l.product, qty: num(l.qty), cost: l.cost === '' || l.cost == null ? '' : num(l.cost),
+      ...(isLotTracked(store.findProduct(l.product)) && (String(l.lot || '').trim() || String(l.exp || '').trim()) ? { lot: String(l.lot || '').trim(), exp: String(l.exp || '').trim() } : {}) })) };
     if (!showErrors(root, validateDoc(store.getDb(), doc))) { toast('راجع الحقول المظللة', 'err'); return; }
     store.saveDoc(doc);
     guard.dirty = false;
@@ -353,7 +453,7 @@ export function show(type, { root, params }) {
   setTitle('تسوية مخزون ' + no);
   const costs = B.lineCosts.get(d.id) || [];
   const table = html`<table class="tbl" data-table><thead><tr><th>الصنف</th><th class="num">الفرق</th><th class="num">تكلفة الوحدة</th><th class="num">القيمة</th></tr></thead><tbody>
-    ${(d.lines || []).map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}</td><td class="num">${qty(l.qty)}</td><td class="num">${costs[i] ? money(costs[i].unit) : ''}</td><td class="num">${costs[i] ? money(Math.sign(num(l.qty)) * costs[i].cost) : ''}</td></tr>`)}
+    ${(d.lines || []).map((l, i) => html`<tr><td>${store.findProduct(l.product)?.name || ''}${lineLots(B, d, i) ? html`<small class="c-sub">${lineLots(B, d, i)}</small>` : ''}</td><td class="num">${qty(l.qty)}</td><td class="num">${costs[i] ? money(costs[i].unit) : ''}</td><td class="num">${costs[i] ? money(Math.sign(num(l.qty)) * costs[i].cost) : ''}</td></tr>`)}
   </tbody></table>`;
   root.innerHTML = String(html`
     ${head('تسوية مخزون ' + no, { sub: `${fmtDate(d.date)}${d.notes ? ' · ' + d.notes : ''}`, actions: html`<button class="btn btn-ghost" data-print>🖨️ طباعة</button>${docLocked(d) ? '' : html`<a class="btn btn-ghost" href="#/adjustments/${d.id}/edit">✏️ تعديل</a><button class="btn btn-text-danger" data-del>🗑️ حذف</button>`}` })}

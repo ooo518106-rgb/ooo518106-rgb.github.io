@@ -1,13 +1,13 @@
 // ═══ مستندات البنود: فواتير المبيعات، عروض الأسعار، المرتجعات، فواتير المشتريات ═══
 import * as store from '../store.js';
 import { BRAND } from '../brand.js';
-import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice, addMonths, installmentRows, daysBetween } from '../core.js';
+import { calcDoc, docNo, DOC_TYPES, validateDoc, num, round, addDays, paymentList, NO_POSTING, lineFactor, cancelCreditNote, stockShortages, returnLines, inheritedDiscount, creditCheck, listPrice, addMonths, installmentRows, daysBetween, isLotTracked, lotChoices, MAIN_WH } from '../core.js';
 import { html, raw, money, fmtDate, toast, confirmBox, modal, combo, showErrors, badge, empty, norm, $, $$, exportTable, moneyText, field } from '../ui.js';
 import { go, guard, setTitle, docHref, SEG } from '../nav.js';
 import {
   head, bindRows, today, S, dec, taxLabel, partyName, docStatus, periodOf, periodBar, bindPeriod, inPeriod,
   moneyList, moneyOptions, partyItems, productItems, quickParty, quickProduct, taxOptions, docPaper, printPaper, entryTable, waLink, csvName,
-  docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel,
+  docLocked, lockedNote, lockedPage, deliveryPaper, whField, ccField, defaultWh, whLabel, ccLabel, lotText,
 } from './common.js';
 import { repeatDialog } from './recurring.js';
 import { scanForPurchase, takeDraft, receiptCheck } from './scan.js';
@@ -156,7 +156,7 @@ export function form(type, { root, params, query }) {
     if (type === 'quote') d.validUntil = addDays(d.date, 15);
     const src = store.findDoc(query.from || query.copy);
     if (src && src.lines) {
-      d.party = src.party; d.lines = clone(src.lines); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
+      d.party = src.party; d.lines = clone(src.lines).map(({ lot, exp, ...rest }) => rest); d.inclusive = !!src.inclusive; d.notes = src.notes || '';
       if (src.discMode) { d.discMode = src.discMode; d.discVal = src.discVal; }
       if (query.from && NO_POSTING.includes(src.type)) d.fromQuote = src.id;
       if (src.type === 'porder' || src.type === 'sorder') { d.dueDate = ''; d.ref = src.ref || ''; }
@@ -293,12 +293,32 @@ export function form(type, { root, params, query }) {
   function stockHint(l) {
     const p = store.findProduct(l.product);
     if (!p || p.type !== 'stock' || !(type === 'sale' || type === 'preturn')) return '';
+    const B = store.getBooks();
     const multi = store.getDb().warehouses.length && d.wh;
-    const have = multi ? store.getBooks().whQty.get(p.id)?.get(d.wh) || 0 : stock().get(p.id)?.qty || 0;
+    const total = multi ? B.whQty.get(p.id)?.get(d.wh) || 0 : stock().get(p.id)?.qty || 0;
+    // المنتج المتتبَّع بالدفعات يُباع من الصالح فقط: المنتهي يظهر منفصلاً ولا يدخل المتوفر
+    const byLot = type === 'sale' && isLotTracked(p);
+    const have = byLot ? B.lotValid(p.id, multi ? d.wh : null, d.date) : total;
     const mine = existing && (!multi || existing.wh === d.wh) ? (existing.lines || []).filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0) : 0;
     const avail = round(have + mine, 3);
     const want = round(d.lines.filter((x) => x.product === p.id).reduce((t, x) => t + num(x.qty) * lineFactor(x), 0), 3);
-    return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail} ${p.unit || ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
+    const expired = byLot ? round(total - have, 3) : 0;
+    return html`<small class="c-sub ${want > avail ? 'neg' : ''}">المتوفر: ${avail} ${p.unit || ''}${expired > 0 ? ` (${expired} منتهية الصلاحية لا تُباع)` : ''}${want > avail ? ' — الكمية أكبر من المتوفر' : ''}</small>`;
+  }
+
+  // الدفعة في بند منتج متتبَّع: الوارد (شراء، مرتجع مبيعات) يكتب رقمها وتاريخها، والصادر (بيع، مرتجع مشتريات) يختارها أو يترك السحب تلقائياً
+  const stockMoves = !NO_POSTING.includes(type);
+  const whKey = () => (store.getDb().warehouses.length ? (d.wh || MAIN_WH) : null);
+  function lotCell(l, i) {
+    const p = store.findProduct(l.product);
+    if (!stockMoves || !isLotTracked(p)) return '';
+    if (type === 'purchase' || type === 'sreturn') {
+      return html`<span class="lot-line"><input class="inp lot-n" data-k="lot" data-f="lot${i}" value="${l.lot || ''}" placeholder="${type === 'purchase' ? 'رقم الدفعة' : 'الدفعة (تعود لدفعتها الأصلية إن تركتها)'}" dir="auto" aria-label="رقم الدفعة، بند ${i + 1}"><input class="inp lot-d" type="date" data-k="exp" data-f="exp${i}" value="${l.exp || ''}" aria-label="تاريخ الانتهاء، بند ${i + 1}"></span><small class="fld-e" data-err="lot${i}" hidden></small><small class="fld-e" data-err="exp${i}" hidden></small>`;
+    }
+    const ch = lotChoices(store.getBooks(), p.id, whKey(), d.date, { expired: type === 'preturn' });
+    const cur = l.lot || l.exp ? `${l.lot || ''}|${l.exp || ''}` : '';
+    const known = !cur || ch.some((c) => `${c.lot}|${c.exp}` === cur);
+    return html`<span class="lot-line"><select class="inp" data-lpick aria-label="الدفعة، بند ${i + 1}"><option value="">الدفعة: الأقرب انتهاءً تلقائياً</option>${known ? '' : html`<option value="${cur}" selected>${lotText({ lot: l.lot, exp: l.exp })}</option>`}${ch.map((c) => html`<option value="${c.lot}|${c.exp}" ${`${c.lot}|${c.exp}` === cur ? raw('selected') : ''}>${lotText(c)}</option>`)}</select></span><small class="fld-e" data-err="exp${i}" hidden></small>`;
   }
 
   // وحدات المنتج: الأساسية ثم الإضافية (كرتون = 12 حبة)
@@ -314,7 +334,7 @@ export function form(type, { root, params, query }) {
     const n = (k, v, ph = '', lab = '') => html`<input class="inp" type="text" inputmode="decimal" data-num autocomplete="off" data-k="${k}" data-f="${k}${i}" value="${v ?? ''}" placeholder="${ph}" aria-label="${lab}، بند ${i + 1}">`;
     return html`<div class="line" data-i="${i}">
       <span class="c-idx">${i + 1}</span>
-      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً" aria-label="المنتج أو البيان، بند ${i + 1}">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small></div>
+      <div class="c-desc" data-label="المنتج / البيان"><input class="inp" data-k="desc" data-f="desc${i}" value="${l.desc || ''}" placeholder="ابحث عن منتج أو اكتب بياناً" aria-label="المنتج أو البيان، بند ${i + 1}">${stockHint(l)}<small class="fld-e" data-err="desc${i}" hidden></small><small class="fld-e" data-err="qty${i}" hidden></small><small class="fld-e" data-err="price${i}" hidden></small><small class="fld-e" data-err="disc${i}" hidden></small>${lotCell(l, i)}</div>
       <div class="c-qty" data-label="الكمية">${n('qty', l.qty, '', 'الكمية')}${unitSelect(l)}</div>
       <div class="c-price" data-label="السعر">${n('price', l.price, '', 'السعر')}</div>
       <div class="c-disc" data-label="خصم %">${n('disc', l.disc, '0', 'الخصم %')}</div>
@@ -527,6 +547,14 @@ export function form(type, { root, params, query }) {
       if (d.discMode) $('[data-k="discVal"]', root).focus();
     }
     if (el.dataset.k === 'tax') { d.lines[Number(el.closest('.line').dataset.i)].tax = el.value; dirty(); drawTotals(); }
+    if (el.matches('[data-lpick]')) {
+      const l = d.lines[Number(el.closest('.line').dataset.i)];
+      const [lot, exp] = el.value ? el.value.split('|') : ['', ''];
+      if (lot || exp) { l.lot = lot; l.exp = exp; } else { delete l.lot; delete l.exp; }
+      dirty();
+    }
+    // تاريخ المستند أو مستودعه يغيّران الدفعات الصالحة المعروضة للاختيار وما يظهر من المتوفر
+    if ((el.dataset.k === 'date' || el.dataset.k === 'wh') && stockMoves && d.lines.some((x) => isLotTracked(store.findProduct(x.product)))) setTimeout(() => drawLines(), 0);
     if (el.dataset.k === 'unit') {
       const i = Number(el.closest('.line').dataset.i);
       const l = d.lines[i];
@@ -614,6 +642,7 @@ export function form(type, { root, params, query }) {
       lines: (lines.length ? lines : d.lines).map((l) => ({
         product: l.product || null, desc: String(l.desc || '').trim(), qty: num(l.qty), price: num(l.price), disc: num(l.disc), tax: showTax ? (l.tax || 'S') : 'S',
         ...(l.product && num(l.factor) > 1 ? { unit: l.unit, factor: num(l.factor) } : {}),
+        ...(stockMoves && isLotTracked(store.findProduct(l.product)) && (String(l.lot || '').trim() || String(l.exp || '').trim()) ? { lot: String(l.lot || '').trim(), exp: String(l.exp || '').trim() } : {}),
       })),
       vatRate: showTax ? num(d.vatRate) : 0,
       notes: String(d.notes || '').trim(),
@@ -646,8 +675,16 @@ export function form(type, { root, params, query }) {
     // سياسة المخزون: إن اختار المالك «منع» فلا يُحفظ بيع أو مرتجع مشتريات بأكثر من المتوفر
     if (!Object.keys(errs).length && s.negativeStock === 'block') {
       for (const sh of stockShortages(db, store.getBooks(), doc, existing)) {
-        doc.lines.forEach((l, i) => { if (l.product === sh.product) errs['qty' + i] = `المتوفر ${sh.have} فقط، والبرنامج مضبوط على منع البيع بأكثر من المخزون`; });
+        const msg = sh.lot ? `الدفعة «${sh.lot}» لا تكفي: المتوفر منها ${sh.have} فقط`
+          : sh.expired ? `المتوفر الصالح ${sh.have} فقط (${sh.expired} منتهية الصلاحية لا تُباع)، والبرنامج مضبوط على منع البيع بأكثر من المخزون`
+            : `المتوفر ${sh.have} فقط، والبرنامج مضبوط على منع البيع بأكثر من المخزون`;
+        doc.lines.forEach((l, i) => { if (l.product === sh.product && (!sh.lot || l.lot || l.exp)) errs['qty' + i] = msg; });
       }
+    }
+    // سياسة «تنبيه فقط»: البيع بأكثر من الدفعات الصالحة مع وجود دفعات منتهية يحتاج تأكيداً صريحاً (المنتهي لا يُباع)
+    if (!Object.keys(errs).length && s.negativeStock !== 'block' && type === 'sale') {
+      const gone = stockShortages(db, store.getBooks(), doc, existing).filter((x) => x.expired);
+      if (gone.length && !(await confirmBox(`${gone.map((x) => `«${x.name}»: المتوفر الصالح ${x.have} فقط و${x.expired} منتهية الصلاحية لا تُباع`).join('، ')}. هل تريد المتابعة؟`, { ok: 'متابعة الحفظ', title: 'دفعات منتهية الصلاحية' }))) return;
     }
     // حد دين العميل: تنبيه أو منع حسب الإعدادات، وفقط حين تزيد هذه الفاتورة دينه فيتجاوز حده
     if (!Object.keys(errs).length) {

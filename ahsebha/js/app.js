@@ -26,6 +26,7 @@ import * as payroll from './views/payroll.js';
 import * as stockViews from './views/stock.js';
 import * as reconcile from './views/reconcile.js';
 import * as todayView from './views/today.js';
+import * as lotsView from './views/lots.js';
 import * as subscription from './views/subscription.js';
 import * as gate from './views/gate.js';
 import { openCompanies } from './views/companies.js';
@@ -83,6 +84,7 @@ on('employees/:id/edit', payroll.employeeForm);
 on('employees/:id', payroll.employeeShow);
 on('reconcile', reconcile.view);
 on('today', todayView.view);
+on('lots', lotsView.view);
 on('subscription', subscription.view);
 on('activate', subscription.activate);
 
@@ -123,6 +125,7 @@ const NAV = [
   { sec: 'المخزون' },
   { ic: '📦', t: 'المنتجات والخدمات', h: 'products' },
   { ic: '🏷️', t: 'ملصقات الباركود', h: 'labels' },
+  { ic: '⏳', t: 'الدفعات والصلاحية', h: 'lots' },
   { ic: '⚖️', t: 'تسويات المخزون', h: 'adjustments' },
   { ic: '🚚', t: 'التحويلات المخزنية', h: 'stock-transfers', need: 'wh' },
   { sec: 'الموظفون والرواتب' },
